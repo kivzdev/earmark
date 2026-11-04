@@ -40,6 +40,7 @@ class Sync:
             pass
         self._wake = threading.Event()
         self._snapshot_due = True
+        self._unshown = False  # moments uploaded since the last snapshot (they show online once one names them)
         threading.Thread(target=self._run, name="sync", daemon=True).start()
 
     def poke(self, snapshot: bool = False) -> None:
@@ -142,11 +143,12 @@ class Sync:
                 break
             size = sum(self._put(rel, s.media / rel, kind) for rel, kind in files)
             lib.mark_synced(row["id"], 1, size)
+            self._unshown = True
         # a snapshot of the library every half hour while it changes, and soon after a stream ends; what the budget
         # no longer holds is let go once the snapshot that doesn't show it is up
         plan = self._fit()
         since = time.time() - self.state["snapshotAt"]
-        stale = lib.changed_at > self.state["snapshotAt"] or bool(plan)
+        stale = lib.changed_at > self.state["snapshotAt"] or self._unshown or bool(plan)
         due = not self.state["snapshotAt"] or since > SNAPSHOT_EVERY or (self._snapshot_due and since > 120)
         if not (stale and due and self.state["uploaded"] < s.sync_uploads_per_day):
             return
@@ -157,7 +159,7 @@ class Sync:
         if code != 200:
             raise RuntimeError(f"library upload answered {code}")
         self.state["snapshotAt"] = time.time()
-        self._snapshot_due = False
+        self._snapshot_due = self._unshown = False
         for mid, state, gone in plan:
             for rel in gone:
                 code = self._call("DELETE", "/api/sync/clip?path=" + urllib.parse.quote(rel))
