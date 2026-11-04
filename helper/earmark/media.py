@@ -136,8 +136,10 @@ def cut(
     out: Path,
     poster: Path | None,
     poster_at: float,
+    thumb: Path | None = None,
 ) -> bool:
-    """Cut [t0, t1] (stream seconds) out of the buffered segments into a small MP4."""
+    """Cut [t0, t1] (stream seconds) out of the buffered segments into a small MP4 (360p, speech-clear mono audio,
+    about 3.3 MB a minute), with a poster frame and a small thumbnail."""
     parts = [(p, s, e) for p, s, e in segments if e > t0 and s < t1 and p.exists()]
     if not parts:
         return False
@@ -150,8 +152,8 @@ def cut(
         ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-f", "concat", "-safe", "0", "-i", str(listing),
         "-ss", f"{start:.3f}", "-t", f"{t1 - t0:.3f}",
-        "-map", "0:v:0?", "-map", "0:a:0", *video_encoder("520k"), "-g", "60",
-        "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-movflags", "+faststart", str(tmp),
+        "-map", "0:v:0?", "-map", "0:a:0", *video_encoder("380k"), "-g", "60",
+        "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-movflags", "+faststart", str(tmp),
     ]
     try:
         done = subprocess.run(cmd, capture_output=True, timeout=60)
@@ -161,12 +163,14 @@ def cut(
         tmp.unlink(missing_ok=True)
         return False
     tmp.replace(out)
-    if poster is not None:
-        poster.parent.mkdir(parents=True, exist_ok=True)
+    for path, size, quality in ((poster, None, "5"), (thumb, "256:-2", "9")):
+        if path is None:
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             [ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-             "-ss", f"{max(0.0, poster_at - t0):.3f}", "-i", str(out),
-             "-frames:v", "1", "-q:v", "5", str(poster)],
+             "-ss", f"{max(0.0, poster_at - t0):.3f}", "-i", str(out), "-frames:v", "1",
+             *(["-vf", f"scale={size}"] if size else []), "-q:v", quality, str(path)],
             capture_output=True, timeout=30,
         )
     return True

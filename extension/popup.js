@@ -44,17 +44,13 @@ async function tabState() {
   })
 }
 
-function sentence(r) {
-  // the phrase's own words in white (where the helper found it), the rest of the sentence grey
+function momentItem(r) {
+  // a moment: its title once the judge has read it (its first words until then), and the expressions in it
   const li = document.createElement('li')
-  const sub = Object.assign(document.createElement('span'), { className: 'sub', textContent: r.pattern })
-  const line = Object.assign(document.createElement('span'), { className: 'line' })
-  const [a, b] = Array.isArray(r.match) ? r.match : [0, 0]
-  const part = (text, cls) => text && line.append(Object.assign(document.createElement(cls ? 'span' : 'mark'), { className: cls, textContent: text }))
-  part(r.sentence.slice(0, a), 'rest')
-  part(r.sentence.slice(a, b), '')
-  part(r.sentence.slice(b), 'rest')
+  const sub = Object.assign(document.createElement('span'), { className: 'sub', textContent: r.picked ? 'Kept for you' : r.title ? 'Moment' : 'Just heard' })
+  const line = Object.assign(document.createElement('span'), { className: 'line', textContent: r.title || `“${r.first}”` })
   li.append(sub, line)
+  if (r.expressions?.length) li.append(Object.assign(document.createElement('span'), { className: 'sub', textContent: r.expressions.join(' · ') }))
   return li
 }
 
@@ -111,13 +107,18 @@ async function render() {
   const recent = live?.recent || []
   $('heard').hidden = !live
   if (live) {
-    swap($('count'), recent.length ? `Caught ${live.caught} ${live.caught === 1 ? 'phrase' : 'phrases'}` : 'Nothing caught yet')
+    swap($('count'), live.moments ? `${live.moments} ${live.moments === 1 ? 'moment' : 'moments'} so far` : 'The first moment comes after a minute')
     const list = $('recent')
-    const key = recent.map(r => r.id).join()
+    const key = recent.map(r => r.id + (r.title || '') + r.picked).join()
     if (list.dataset.key !== key) {
       list.dataset.key = key
-      list.replaceChildren(...recent.slice(0, 3).map(sentence))
+      list.replaceChildren(...recent.slice(0, 3).map(momentItem))
     }
+  }
+  if (status.status?.site) $('open').href = status.status.site
+  if (status.status?.judge?.error) {
+    note.hidden = false
+    note.textContent = `Picking moments by rules: ${status.status.judge.error}`
   }
 }
 

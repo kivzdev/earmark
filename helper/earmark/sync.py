@@ -1,6 +1,6 @@
 """Optional cloud copy of the library (the `/cloud` app in this repository).
 
-Clips are uploaded newest first, a few dozen a day at most, and the oldest ones
+The moments worth keeping are uploaded newest first (starred ones before), a couple of dozen a day at most, and the oldest ones
 are removed from the cloud again when the copy grows past its budget. Your own
 computer keeps everything; the cloud only mirrors it.
 """
@@ -80,28 +80,28 @@ class Sync:
             self._wake.clear()
 
     def _round(self) -> None:
-        app, lib, s = self.app, self.app.library, self.app.settings
+        lib, s = self.app.library, self.app.settings
         today = date.today().isoformat()
         if self.state["day"] != today:
             self.state.update(day=today, uploaded=0)
-        lib.skip_stale_clips(time.time() - 7 * 86400)
+        lib.skip_stale(time.time() - 7 * 86400)
         changed = False
         room = s.sync_clips_per_day - self.state["uploaded"]
-        for row in lib.unsynced_clips(max(0, room)):
+        for row in lib.unsynced_kept(max(0, room)):
             path = s.media / row["clip"]
             if not path.is_file():
-                lib.mark_synced(row["clip"], 3)
+                lib.mark_synced(row["id"], 3)
                 continue
             code = self._call("PUT", "/api/sync/clip?path=" + urllib.parse.quote(row["clip"]), path.read_bytes(),
                               {"Content-Type": "video/mp4"})
             if code != 200:
                 raise RuntimeError(f"clip upload answered {code}")
-            lib.mark_synced(row["clip"], 1)
+            lib.mark_synced(row["id"], 1)
             self.state["uploaded"] += 1
             changed = True
-        # stay inside the budget: drop the oldest clips that aren't starred
-        rows = lib.synced_clips_oldest_first()
-        sizes = {r["clip"]: (s.media / r["clip"]).stat().st_size if (s.media / r["clip"]).is_file() else 0 for r in rows}
+        # stay inside the budget: drop the oldest clips that aren't starred (they stay on this computer)
+        rows = lib.synced_oldest_first()
+        sizes = {r["id"]: (s.media / r["clip"]).stat().st_size if (s.media / r["clip"]).is_file() else 0 for r in rows}
         total = sum(sizes.values())
         budget = s.sync_budget_mb * 1024 * 1024
         for r in rows:
@@ -112,12 +112,12 @@ class Sync:
             code = self._call("DELETE", "/api/sync/clip?path=" + urllib.parse.quote(r["clip"]))
             if code not in (200, 404):
                 raise RuntimeError(f"clip delete answered {code}")
-            lib.mark_synced(r["clip"], 2)
-            total -= sizes[r["clip"]]
+            lib.mark_synced(r["id"], 2)
+            total -= sizes[r["id"]]
             changed = True
         stale = lib.changed_at > self.state["snapshotAt"]
         if changed or (stale and (self._snapshot_due or time.time() - self.state["snapshotAt"] > 600)):
-            body = gzip.compress(json.dumps(lib.export(app.patterns(), cloud=True), separators=(",", ":")).encode())
+            body = gzip.compress(json.dumps(lib.export(cloud=True), separators=(",", ":")).encode())
             code = self._call("PUT", "/api/sync/library", body,
                               {"Content-Type": "application/json", "Content-Encoding": "gzip"})
             if code != 200:

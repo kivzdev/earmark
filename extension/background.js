@@ -43,7 +43,10 @@ chrome.runtime.onConnect.addListener(port => {
 
   port.onMessage.addListener(async m => {
     await loaded
-    if (m.t === 'hello') return reply(settingsMessage())
+    if (m.t === 'hello') {
+      if (!settings.token) await autoPair()
+      return reply(settingsMessage())
+    }
     if (!settings.token) return reply(settingsMessage())
     try {
       if (m.t === 'start') {
@@ -55,7 +58,7 @@ chrome.runtime.onConnect.addListener(port => {
         const prev = chains.get(m.sid) || Promise.resolve()
         const next = prev.then(async () => {
           const { status, data } = await api(`/v1/sessions/${m.sid}/chunk?seq=${m.seq}`, { method: 'POST', body: bytes(m.data) })
-          if (status === 200) { reply({ t: 'caught', sid: m.sid, n: data.caught }); badge(tabId, data.caught) }
+          if (status === 200) { reply({ t: 'caught', sid: m.sid, n: data.moments }); badge(tabId, data.moments) }
           else if (status === 401) await forget()
           else if (status === 410 || status === 404) { chains.delete(m.sid); reply({ t: 'gone', sid: m.sid }) }
         }).catch(() => { chains.delete(m.sid); reply({ t: 'offline', sid: m.sid }) })
@@ -98,6 +101,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
     await loaded
     if (m.t === 'status') {
       await collect()
+      if (!settings.token) await autoPair()
       try {
         const { status, data } = await api('/v1/status')
         reply({ helper: true, paired: status === 200, status: status === 200 ? data : null, paused: settings.paused, waiting: !!(await pending()) })
@@ -132,24 +136,37 @@ async function collect() {
   } catch { /* the helper isn't answering right now: try again later */ }
 }
 
+// Earmark on this computer lets its extension in by itself (unless it was set to ask first, EARMARK_AUTO_PAIR=0): ask
+// for the token whenever there isn't one, at most twice a minute
+let askedAt = 0
+async function autoPair() {
+  if (settings.token || Date.now() - askedAt < 30000) return
+  askedAt = Date.now()
+  await request()
+}
+
+/** ask the helper to pair; a request it allows at once is collected at once, one that waits is kept for later */
+async function request() {
+  try {
+    const { status, data } = await api('/v1/pair', { method: 'POST', json: {} })
+    if (status !== 200) return { ok: false, error: data?.error || `helper answered ${status}` }
+    await chrome.storage.local.set({ pairing: { id: data.id, until: Date.now() + 9 * 60 * 1000 } })
+    if (data.state === 'allowed') { await collect(); return { ok: true, paired: true } }
+    return { ok: true, id: data.id }
+  } catch {
+    return { ok: false, error: 'offline' }
+  }
+}
+
 async function pair() {
   const waiting = await pending()
-  let id = waiting?.id
-  if (!id) {
-    try {
-      const { status, data } = await api('/v1/pair', { method: 'POST', json: {} })
-      if (status !== 200) return { ok: false, error: data?.error || `helper answered ${status}` }
-      id = data.id
-    } catch {
-      return { ok: false, error: 'offline' }
-    }
-    await chrome.storage.local.set({ pairing: { id, until: Date.now() + 9 * 60 * 1000 } })
-  }
-  await chrome.tabs.create({ url: `${HELPER}/settings?pair=${encodeURIComponent(id)}` })
-  // keep asking while this worker is awake (an extension call each round keeps it from sleeping mid-wait)
+  const r = waiting ? { ok: true, id: waiting.id } : await request()
+  if (!r.ok || r.paired) return r
+  // this helper wants you to allow it on its dashboard
+  await chrome.tabs.create({ url: `${HELPER}/settings?pair=${encodeURIComponent(r.id)}` })
   ;(async () => {
     for (let i = 0; i < 120 && (await pending()); i++) {
-      await new Promise(r => setTimeout(r, 1500))
+      await new Promise(res => setTimeout(res, 1500))
       await collect()
     }
   })()
@@ -157,4 +174,4 @@ async function pair() {
 }
 
 // woken up with a pairing still open: see whether it was allowed while asleep
-loaded.then(collect)
+loaded.then(async () => { await collect(); await autoPair() })

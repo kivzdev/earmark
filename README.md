@@ -1,34 +1,40 @@
 # Earmark
 
-Earmark watches Twitch with you and keeps the everyday English you hear — *which is…*, *the thing is…*, *I was gonna…*,
-*to be fair…* — together with the clip it was said in. Every phrase becomes a card, and every streamer who says it adds
-their own clip to it, so you can hear the same phrase again and again, in different voices.
+Earmark watches Twitch with you and keeps the everyday English you hear. It writes down everything the streamer says,
+cuts the stream into one-minute moments with their video, keeps the ones worth hearing again — *I have to go down
+without dying*, *it's just blown up*, *we'll figure it out* — and points out the expressions in them, so you can replay
+a sentence until the fast, mumbled version makes sense.
 
-It runs on your own computer. Nothing is sent anywhere unless you set up a private copy of your own.
+It runs on your own computer. Nothing is sent anywhere unless you add an Anthropic key (to let Claude pick the moments)
+or set up a private copy of your own.
 
 ```
 Chrome extension ──► the Earmark helper on your computer ──► your dashboard (http://127.0.0.1:3276)
- (twitch.tv tab)      speech to text · phrases · clips          └─► optional private copy online
+ (twitch.tv tab)      speech to text · moments · clips          └─► optional private copy online
 ```
 
 ## What it does
 
 - **Listens with you.** While a Twitch stream or VOD plays, the extension hands a small 360p copy of what the player
   shows and says to the helper. It pauses during ads and skips streams tagged with another language.
-- **Writes down what's said**, on your computer: NVIDIA's Parakeet on Apple Silicon, Whisper elsewhere.
-- **Catches everyday phrases**: 110+ connectors, sentence frames, discourse markers, phrasal verbs and set expressions
-  (`helper/earmark/patterns.json`), plus any you add. Sentences don't have to match exactly; the phrase does.
-- **Clips the moment**: the sentence, cut to its own edges, with the words lighting up as they're spoken. Loop it,
-  or jump to *another voice* saying the same phrase.
-- **Sorts what you watch** into politics, entertainment and gaming (with the game: Minecraft, Call of Duty,
-  Counter-Strike…), from the stream's own Twitch category, title and tags. You can correct any streamer.
-- **Shows your day**: how long you watched, how many words you heard, what you caught, and the days before.
+- **Writes down everything said**, on your computer: NVIDIA's Parakeet on Apple Silicon, Whisper elsewhere.
+- **Cuts it into moments**: about a minute each, at sentence ends, with the video and the transcript word by word.
+  In the player the words light up as they're spoken; click a sentence to hear it again and again; slow it to
+  0.75× or 0.5× for the quick, swallowed bits.
+- **Keeps the good ones for you.** With an Anthropic API key, Claude Haiku 5.5 reads each minute and scores how much
+  everyday spoken English is in it, gives it a title and picks out the expressions worth learning, with a short note
+  each. Without a key, a built-in list of 110+ everyday phrases does the same job by rules.
+- **A catalog like Twitch's**: your categories with Twitch's covers, the channels you watch (live now, when they last
+  streamed, their last stream), and who's live in a category right now. Streams are sorted into politics,
+  entertainment and gaming (with the game) from their own Twitch category, title and tags; you can correct any
+  channel.
+- **Expressions, across voices**: every expression links to each moment it was said in, by whoever said it.
 
 ## What it costs
 
-Nothing, by default. Speech recognition runs on your computer and phrases are matched by rules, so no AI tokens are
-used at all; clips are just files. If your computer is too slow for local speech recognition, you can use a cheap
-cloud engine instead: Groq's `whisper-large-v3-turbo` costs about $0.04 per hour of audio.
+Speech recognition runs on your computer for free, and clips are just files. Letting Claude pick the moments costs
+about a cent or two per hour of stream (Claude Haiku 5.5, a short request per minute); without a key it's free. If
+your computer is too slow for local speech recognition, Groq's `whisper-large-v3-turbo` does it for about $0.04 an hour.
 
 ## Setup
 
@@ -52,7 +58,16 @@ Whisper (`small.en` by default; set `EARMARK_MODEL` for another size) through fa
 `extension` folder. Click Earmark in the toolbar, then *Connect to Earmark*, and allow it in the dashboard tab that
 opens. That's it: open an English stream on Twitch.
 
-Keep the helper running while you watch (`uv run earmark` in `helper/`, or `npm run helper` from the top folder).
+The extension connects to the helper by itself. To have the helper start whenever you log in (macOS):
+
+```bash
+uv run earmark autostart on
+```
+
+Otherwise keep it running while you watch (`uv run earmark` in `helper/`, or `npm run helper` from the top folder).
+
+**Let Claude pick the moments** (optional): put `ANTHROPIC_API_KEY=…` in `.env` at the top folder and restart the
+helper (`uv run earmark autostart on` restarts it too).
 
 ### Without Twitch
 
@@ -65,18 +80,23 @@ uv run earmark doctor        # checks ffmpeg and the speech engine
 
 ### Your own phrases
 
-In *Settings*, add a phrase in plain words, with `…` where anything can go: `end up …ing`. Earmark listens for it
-from then on.
+Without Claude, moments are picked by the phrase list. In *Settings*, add a phrase in plain words, with `…` where
+anything can go: `end up …ing`.
 
 ## Privacy and security
 
-- The extension only reads twitch.tv pages and only talks to `127.0.0.1`. It has no other permissions.
+- The extension only reads twitch.tv pages and only talks to `127.0.0.1`. It has no other permissions. It connects to
+  the helper by itself; any extension on your computer could ask the same way, so set `EARMARK_AUTO_PAIR=0` if you'd
+  rather allow it on the dashboard.
 - The helper only listens on `127.0.0.1`. It answers only requests addressed to that name (so a web page can't reach it
   through DNS rebinding), the extension's requests carry a secret token you approve once in the dashboard, and the
   dashboard's changes need a header that other sites can't send.
 - Your library lives in `~/Library/Application Support/Earmark` (macOS), `%APPDATA%\Earmark` (Windows) or
   `~/.local/share/earmark` (Linux).
 - Secrets go in `.env` (see `.env.example`), which is never committed.
+- With an Anthropic key, each minute's transcript (text only, never video or audio) goes to Anthropic's API.
+- For covers, pictures and live status, the helper asks Twitch's public web API about the channels and categories you
+  watched, the same questions twitch.tv's own pages ask; nothing about you is sent.
 - Clips are for your own study. Don't republish other people's streams.
 
 ## A private copy online (optional)
@@ -92,9 +112,10 @@ only what your helper uploads and opens only with your passkey (Face ID, Touch I
 3. Open the site, type the setup code, and make a passkey. The code only works while the site has no passkey; if you
    ever lose them all, delete `auth/passkeys.json` from the Blob store and set up again.
 
-Vercel's free plan gives Blob storage 1 GB and 2,000 uploads a month, so the helper uploads at most 40 clips a day
-(starred and newest first) and keeps the copy under 900 MB by removing the oldest clips that aren't starred. Your
-computer always keeps everything. Both limits are in `.env.example`.
+Only the kept moments go up. Vercel's free plan gives Blob storage 1 GB and 2,000 uploads a month, so the helper uploads
+at most 25 clips a day (starred and newest first) and keeps the copy under 900 MB by removing the oldest clips that
+aren't starred; their small pictures ride along inside the library. Your computer keeps every moment, and the video of
+moments nobody kept for 14 days (`EARMARK_KEEP_DAYS`). Limits are in `.env.example`.
 
 ## Development
 

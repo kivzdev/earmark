@@ -120,7 +120,7 @@
   .rail-l { position: absolute; top: var(--top); left: var(--s5); right: var(--s5); z-index: auto; width: auto; align-items: flex-start; padding: 0; gap: var(--s2) }
   .logo { margin-block: calc((var(--ctl) - 20px) / 2) }
   .nav { margin: 0; flex-direction: row }
-  .nav [data-nav='today'] { display: none } /* the mark goes to today */
+  .nav [data-nav='home'] { display: none } /* the mark goes home */
   .col { padding-top: calc(var(--top) + 2 * var(--ctl) + var(--s2) + var(--s8) + (var(--ctl) - var(--lh)) / 2) }
   /* lists in a narrow column: the label column takes less room (still a word like "Watched" or a streamer's name), and
      a long line wraps onto a second one, the row growing with it, rather than being cut; its date stays on the first

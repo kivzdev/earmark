@@ -4,6 +4,8 @@
   earmark doctor          check ffmpeg, the speech engine and where data is kept
   earmark listen FILE     run a video or audio file through Earmark as if you watched it
                           [--channel NAME] [--category "Just Chatting"] [--title TEXT]
+  earmark autostart on    start Earmark whenever you log in (macOS), and right now
+  earmark autostart off
 """
 
 from __future__ import annotations
@@ -95,11 +97,17 @@ def _listen(args) -> int:
     session.end()
     while app.session(session.id):
         time.sleep(0.5)
-    print(f"heard {session.pcm.end:.0f} s · {session.words} words · caught {session.caught}")
+    # the judge works through the moments in the background: wait for it
+    deadline = time.time() + 120
+    while app.library.unjudged_moments() and time.time() < deadline:
+        time.sleep(0.5)
+    print(f"heard {session.pcm.end:.0f} s · {session.words} words · {session.moments} moments")
     if session.error:
         print("error:", session.error)
-    for c in reversed(session.recent):
-        print(f"  {c['pattern']:<28} {c['sentence']}")
+    if app.judge.error:
+        print("judge:", app.judge.error)
+    for m in reversed(app.library.recent_moments(session.id, 50)):
+        print(f"  {'kept ' if m['picked'] else '     '}{m['title'] or m['first'][:60]}  — {', '.join(m['expressions'])}")
     return 0
 
 
@@ -113,7 +121,19 @@ def main() -> None:
     listen.add_argument("--channel", default="local")
     listen.add_argument("--category", default="Just Chatting")
     listen.add_argument("--title", default="")
+    auto = sub.add_parser("autostart")
+    auto.add_argument("state", choices=["on", "off"])
     args = parser.parse_args()
+    if args.cmd == "autostart":
+        from . import autostart
+        from .config import REPO
+
+        if args.state == "on":
+            print("starts at login:", autostart.turn_on(REPO / "helper"))
+        else:
+            autostart.turn_off()
+            print("won't start at login any more")
+        sys.exit(0)
     if args.cmd == "doctor":
         sys.exit(_doctor())
     if args.cmd == "listen":

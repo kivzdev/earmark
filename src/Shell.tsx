@@ -5,38 +5,41 @@ import { onReveal, playReveal, revealed } from '@/motion/stage'
 import { Link, usePath } from '@/router'
 import { signOut } from '@/auth'
 import { start, useStore } from '@/data'
-import { Mark, PhrasesIcon, SettingsIcon, SignOutIcon, StreamsIcon, TodayIcon } from '@/ui/icons'
+import { HomeIcon, Mark, MomentsIcon, PhrasesIcon, SettingsIcon, SignOutIcon } from '@/ui/icons'
 import { usePill } from '@/ui/pill'
 import { Login } from '@/pages/Login'
-import { Missing, Phrase, Phrases, Streamer, Streams, Today } from '@/pages/pages'
+import { Category, Channel, Expression, Expressions, Home, Missing, Moment, Moments } from '@/pages/catalog'
 import { Settings } from '@/pages/Settings'
 
 // the rail's sections, each with the colour its icon takes with the highlight (kivz.dev's palette: pink, blue, the
 // mascot's yellow, green)
 const NAV = [
-  { id: 'today', href: '/', label: 'Today', Icon: TodayIcon, tint: 'var(--pink)' },
-  { id: 'phrases', href: '/phrases', label: 'Phrases', Icon: PhrasesIcon, tint: 'var(--blue)' },
-  { id: 'streams', href: '/streams', label: 'Streams', Icon: StreamsIcon, tint: 'var(--mascot)' },
+  { id: 'home', href: '/', label: 'Home', Icon: HomeIcon, tint: 'var(--pink)' },
+  { id: 'moments', href: '/moments', label: 'Moments', Icon: MomentsIcon, tint: 'var(--blue)' },
+  { id: 'expressions', href: '/expressions', label: 'Expressions', Icon: PhrasesIcon, tint: 'var(--mascot)' },
   { id: 'settings', href: '/settings', label: 'Settings', Icon: SettingsIcon, tint: 'var(--green)' },
 ] as const
 const tint = (c: string) => ({ '--tint': c }) as CSSProperties
 
 function routeOf(path: string) {
   let m
-  if (path === '/') return { name: 'today', section: 'today' } as const
-  if ((m = path.match(/^\/day\/(\d{4}-\d{2}-\d{2})$/))) return { name: 'day', section: 'today', key: m[1] } as const
-  if (path === '/phrases') return { name: 'phrases', section: 'phrases' } as const
-  if ((m = path.match(/^\/phrases\/([\w-]+)$/))) return { name: 'phrase', section: 'phrases', id: m[1] } as const
-  if (path === '/streams') return { name: 'streams', section: 'streams' } as const
-  if ((m = path.match(/^\/streamers\/([a-z0-9_]+)$/))) return { name: 'streamer', section: 'streams', login: m[1] } as const
+  const arg = (x: string) => { try { return decodeURIComponent(x) } catch { return x } }
+  if (path === '/') return { name: 'home', section: 'home' } as const
+  if (path === '/moments') return { name: 'moments', section: 'moments' } as const
+  if ((m = path.match(/^\/m\/([a-f0-9]{12})$/))) return { name: 'moment', section: 'moments', id: m[1] } as const
+  if ((m = path.match(/^\/c\/(.+)$/))) return { name: 'category', section: 'home', arg: arg(m[1]) } as const
+  if ((m = path.match(/^\/ch\/([a-z0-9_]+)$/))) return { name: 'channel', section: 'home', arg: m[1] } as const
+  if (path === '/expressions') return { name: 'expressions', section: 'expressions' } as const
+  if ((m = path.match(/^\/e\/(.+)$/))) return { name: 'expression', section: 'expressions', arg: arg(m[1]) } as const
   if (path === '/settings') return { name: 'settings', section: 'settings' } as const
   return { name: 'missing', section: null } as const
 }
 type Route = ReturnType<typeof routeOf>
 
-const titleOf = (r: Route) =>
-  ({ today: 'Today', day: 'A day', phrases: 'Phrases', phrase: 'A phrase', streams: 'Streams', streamer: 'A streamer',
-    settings: 'Settings', missing: 'Not found' })[r.name] + ' — Earmark'
+const TITLES: Record<Route['name'], string> = {
+  home: 'Earmark', moments: 'Moments', moment: 'A moment', category: 'Category', channel: 'Channel',
+  expressions: 'Expressions', expression: 'Expression', settings: 'Settings', missing: 'Not found',
+}
 
 /**
  * Earmark's frame, kivz.dev's: the rail on the left (the mark, the sections) and one column of text centred on the
@@ -110,20 +113,22 @@ export function Shell() {
   }, { dependencies: [shown, locked] })
   const { library } = useStore()
   useEffect(() => {
-    const named = route.name === 'phrase' ? library?.patterns.find(p => p.id === route.id)?.label
-      : route.name === 'streamer' ? library?.sessions.find(s => s.channel === route.login)?.displayName : null
-    document.title = locked ? 'Earmark' : named ? `${named} — Earmark` : titleOf(route)
+    const named = route.name === 'moment' ? library?.moments.find(m => m.id === route.id)?.title
+      : route.name === 'category' || route.name === 'expression' ? route.arg
+      : route.name === 'channel' ? library?.channels.find(c => c.login === route.arg)?.displayName : null
+    document.title = locked || route.name === 'home' ? 'Earmark' : `${named || TITLES[route.name]} — Earmark`
   }, [shown, locked, library])
 
   const page =
     error && !meta ? <Down key="down" error={error} />
     : locked ? <Login key="login" setup={!!meta?.setup} />
-    : route.name === 'today' ? <Today key={shown} />
-    : route.name === 'day' ? <Today key={shown} day={route.key} />
-    : route.name === 'phrases' ? <Phrases key={shown} />
-    : route.name === 'phrase' ? <Phrase key={shown} id={route.id} />
-    : route.name === 'streams' ? <Streams key={shown} />
-    : route.name === 'streamer' ? <Streamer key={shown} login={route.login} />
+    : route.name === 'home' ? <Home key={shown} />
+    : route.name === 'moments' ? <Moments key={shown} />
+    : route.name === 'moment' ? <Moment key={shown} id={route.id} />
+    : route.name === 'category' ? <Category key={shown} name={route.arg} />
+    : route.name === 'channel' ? <Channel key={shown} login={route.arg} />
+    : route.name === 'expressions' ? <Expressions key={shown} />
+    : route.name === 'expression' ? <Expression key={shown} name={route.arg} />
     : route.name === 'settings' && !cloud ? <Settings key={shown} />
     : <Missing key={shown} />
 

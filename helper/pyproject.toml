@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Watches Twitch with you and keeps the everyday English you hear, with the clip it was said in."
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26"]
+dependencies = ["numpy>=1.26", "anthropic>=1.0"]
 
 [project.optional-dependencies]
 # Apple Silicon: NVIDIA Parakeet on MLX (fast, accurate English, word timings)

@@ -217,6 +217,70 @@ app.get('/media/*', async c => {
   return c.body(bytes, 200, head)
 })
 
+// ── Twitch's public facts: who's live in a category, a channel's picture and last stream (signed in; cached) ──────
+// (the same public GraphQL questions twitch.tv's own pages ask, with its web client's id, and nothing else)
+const GQL = 'https://gql.twitch.tv/gql'
+const TWITCH_CLIENT = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
+const asked = new Map<string, { at: number; data: unknown }>()
+async function twitch(key: string, ttl: number, query: string, variables: Record<string, unknown>) {
+  const hit = asked.get(key)
+  if (hit && Date.now() - hit.at < ttl) return hit.data
+  const res = await fetch(GQL, {
+    method: 'POST',
+    headers: { 'Client-Id': TWITCH_CLIENT, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null)
+  const data = res?.ok ? ((await res.json()) as { data?: unknown }).data ?? null : null
+  if (data) asked.set(key, { at: Date.now(), data })
+  if (asked.size > 500) asked.clear()
+  return data ?? hit?.data ?? null
+}
+type GqlStream = { title: string; viewersCount: number; createdAt: string; previewImageURL: string; broadcaster: { login: string; displayName: string; profileImageURL: string } }
+type GqlUser = {
+  login: string; displayName: string; profileImageURL: string | null
+  stream: { title: string; viewersCount: number; createdAt: string; game: { displayName: string } | null } | null
+  lastBroadcast: { startedAt: string | null } | null
+  videos: { edges: { node: { id: string } }[] } | null
+}
+
+app.get('/twitch/live', async c => {
+  if (!authed(c)) return c.json({ error: 'sign in' }, 401)
+  const category = (c.req.query('category') || '').slice(0, 120)
+  if (!category) return c.json({ streams: [] })
+  const data = await twitch(`live:${category.toLowerCase()}`, 90_000, `query($name: String!) { game(name: $name) {
+    streams(first: 10, options: {broadcasterLanguages: [EN], sort: VIEWER_COUNT}) { edges { node {
+      title viewersCount createdAt previewImageURL(width: 440, height: 248)
+      broadcaster { login displayName profileImageURL(width: 70) } } } } } }`, { name: category }) as
+    { game?: { streams?: { edges?: { node: GqlStream }[] } } } | null
+  const edges = data?.game?.streams?.edges ?? []
+  return c.json({ streams: edges.filter(e => e.node?.broadcaster).map(({ node: n }) => ({
+    login: n.broadcaster.login, displayName: n.broadcaster.displayName, avatar: n.broadcaster.profileImageURL,
+    title: n.title, viewers: n.viewersCount, since: n.createdAt, preview: n.previewImageURL,
+  })) })
+})
+
+app.get('/twitch/channels', async c => {
+  if (!authed(c)) return c.json({ error: 'sign in' }, 401)
+  const logins = (c.req.query('logins') || '').split(',').filter(l => /^[a-z0-9_]{1,40}$/.test(l)).slice(0, 50).sort()
+  if (!logins.length) return c.json({ channels: {} })
+  const data = await twitch(`ch:${logins.join(',')}`, 120_000, `query($logins: [String!]) { users(logins: $logins) {
+    login displayName profileImageURL(width: 150)
+    stream { title viewersCount createdAt game { displayName } }
+    lastBroadcast { startedAt }
+    videos(first: 1, type: ARCHIVE) { edges { node { id } } } } }`, { logins }) as { users?: (GqlUser | null)[] } | null
+  const channels: Record<string, unknown> = {}
+  for (const u of data?.users ?? []) {
+    if (!u) continue
+    channels[u.login] = {
+      displayName: u.displayName, avatar: u.profileImageURL,
+      live: u.stream ? { title: u.stream.title, viewers: u.stream.viewersCount, since: u.stream.createdAt, category: u.stream.game?.displayName ?? null } : null,
+      lastLive: u.lastBroadcast?.startedAt ?? null, lastVod: u.videos?.edges?.[0]?.node.id ?? null,
+    }
+  }
+  return c.json({ channels })
+})
+
 // ── the helper's uploads (sync token) ─────────────────────────────────────────────────────────────────────────
 app.use('/sync/*', async (c, next) => {
   const token = env('EARMARK_SYNC_TOKEN')
@@ -245,13 +309,13 @@ app.delete('/sync/clip', async c => {
 
 app.put('/sync/library', async c => {
   const bytes = new Uint8Array(await c.req.arrayBuffer())
-  let data: { version?: number; catches?: unknown[] }
+  let data: { version?: number; moments?: unknown[] }
   try {
     data = JSON.parse(gunzipSync(bytes).toString())
   } catch {
     return c.json({ error: 'send the library as gzipped JSON' }, 400)
   }
-  if (data.version !== 1 || !Array.isArray(data.catches)) return c.json({ error: 'not an Earmark library' }, 400)
+  if (data.version !== 2 || !Array.isArray(data.moments)) return c.json({ error: 'not an Earmark library (version 2)' }, 400)
   await store().write(LIBRARY, bytes, 'application/gzip')
   return c.json({ ok: true })
 })

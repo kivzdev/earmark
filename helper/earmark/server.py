@@ -20,12 +20,13 @@ from .app import App
 from .categories import GROUPS
 from .config import REPO
 from .patterns import KINDS, phrase_to_regex
+from .autostart import is_on as autostart_on
 
 WEB = REPO / "dist"
 MAX_CHUNK = 8 * 1024 * 1024
 
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://static-cdn.jtvnw.net; "
     "media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
     "form-action 'self'"
 )
@@ -141,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/v1/"):
                 return self._extension(method, path, parse_qs(url.query))
             if path.startswith("/api/"):
-                return self._api(method, path)
+                return self._api(method, path, parse_qs(url.query))
             if path.startswith("/media/") and method == "GET":
                 return self._media(path[len("/media/"):])
             if method == "GET":
@@ -162,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(403, "pairing is for the Earmark extension")
             if method == "POST" and not m[1]:
                 try:
-                    return self._json(200, {"id": app.pair_request(origin)})
+                    return self._json(200, app.pair_request(origin))
                 except ValueError as e:
                     return self._error(429, str(e))
             if method == "GET" and m[1]:
@@ -202,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, OSError):
                 session.end()
                 return self._error(410, "decoder stopped")
-            return self._json(200, {"caught": session.caught, "error": session.error})
+            return self._json(200, {"moments": session.moments, "error": session.error})
         if m[2] == "meta" and method == "POST":
             meta = self._json_body() or {}
             fields = {k: meta[k] for k in ("category", "title", "displayName") if isinstance(meta.get(k), str)}
@@ -219,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error(405, "method not allowed")
 
     # the dashboard -------------------------------------------------------------
-    def _api(self, method: str, path: str) -> None:
+    def _api(self, method: str, path: str, query: dict) -> None:
         app = self.app
         if method == "GET":
             if path == "/api/meta":
@@ -227,25 +228,36 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": "local",
                     "version": app.version,
                     "engine": app.engine_status(),
+                    "judge": app.judge.status(),
                     "sync": app.sync.status() if app.sync else None,
                     "pairing": app.pending_pairs(),
                     "live": app.status()["sessions"],
                     "kinds": KINDS,
                     "home": str(app.settings.home),
+                    "autostart": autostart_on(),
+                    "phrases": [{"id": r["id"], "label": r["label"]} for r in app.library.custom_patterns()],
                 })
             if path == "/api/library":
-                body = json.dumps(app.library.export(app.patterns()), separators=(",", ":")).encode()
+                body = json.dumps(app.library.export(), separators=(",", ":")).encode()
                 return self._send(200, body)
+            if path == "/api/twitch/live":
+                category = (query.get("category") or [""])[0][:120]
+                return self._json(200, {"streams": app.twitch.live(category) if category else []})
+            if path == "/api/twitch/channels":
+                logins = [l for l in (query.get("logins") or [""])[0].split(",") if re.fullmatch(r"[a-z0-9_]{1,40}", l)]
+                return self._json(200, {"channels": app.twitch.channels(logins[:50])})
             return self._error(404, "not found")
         if not self._dashboard_ok():
             return self._error(403, "forbidden")
-        m = re.fullmatch(r"/api/catches/([a-f0-9]{12})", path)
+        m = re.fullmatch(r"/api/moments/([a-f0-9]{12})", path)
         if m and method == "PATCH":
             data = self._json_body() or {}
-            ok = app.library.update_catch(m[1], starred=bool(data["starred"]) if "starred" in data else None)
+            ok = "starred" in data and app.library.star(m[1], bool(data["starred"]))
+            if ok and app.sync:
+                app.sync.poke(snapshot=True)
             return self._json(200 if ok else 404, {"ok": ok})
         if m and method == "DELETE":
-            ok = app.library.delete_catch(m[1])
+            ok = app.library.delete_moment(m[1])
             return self._json(200 if ok else 404, {"ok": ok})
         m = re.fullmatch(r"/api/channels/([a-z0-9_]{1,40})", path)
         if m and method == "PATCH":
@@ -284,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error(404, "not found")
 
     def _media(self, rel: str) -> None:
-        if not re.fullmatch(r"(clips|posters)/\d{4}/\d{2}/[a-f0-9]{12}\.(mp4|jpg)", rel):
+        if not re.fullmatch(r"(clips/\d{4}/\d{2}/[a-f0-9]{12}\.mp4|(posters|thumbs)/\d{4}/\d{2}/[a-f0-9]{12}\.jpg)", rel):
             return self._error(404, "not found")
         path = self.app.settings.media / rel
         if not path.is_file():

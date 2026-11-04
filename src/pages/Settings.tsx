@@ -12,7 +12,7 @@ export function Settings() {
   const asked = new URLSearchParams(location.search).get('pair')
   const pairing = meta.pairing ?? []
   const engine = meta.engine
-  const custom = library.patterns.filter(p => p.custom)
+  const custom = meta.phrases ?? []
 
   const answer = (id: string, allow: boolean) => write('POST', `/api/pairing/${id}`, { allow })
     .then(() => { if (allow) window.postMessage({ source: 'earmark-dashboard', type: 'paired' }, location.origin) })
@@ -34,8 +34,8 @@ export function Settings() {
     <div className="page">
       <Head title="Settings" lead="Earmark on this computer" />
 
-      <Section label="Extension">
-        {pairing.length ? pairing.map(p => (
+      {pairing.length > 0 && <Section label="Extension">
+        {pairing.map(p => (
           <div key={p.id} className="ask" data-in="col">
             <p>{p.id === asked ? 'The Earmark extension you just clicked wants to connect.' : 'A browser extension wants to connect.'}</p>
             <div className="controls">
@@ -43,11 +43,19 @@ export function Settings() {
               <button className="btn btn-solo" type="button" onClick={() => answer(p.id, false)}>Deny</button>
             </div>
           </div>
-        )) : (
-          <p className="muted" data-in="col">
-            {asked ? 'Connected. You can close this tab.' : 'To connect Chrome, click Earmark in the toolbar, then Connect to Earmark.'}
-          </p>
-        )}
+        ))}
+      </Section>}
+      {asked && !pairing.length && <p className="muted" data-in="col">Connected. You can close this tab.</p>}
+
+      <Section label="Picking moments">
+        <Table>
+          <Rows label="Judge">
+            <li><span className="row"><span>{meta.judge?.model ? 'Claude Haiku 5.5' : 'The phrase list'}</span>
+              <span className="muted">{meta.judge?.waiting ? `${meta.judge.waiting} waiting` : 'Up to date'}</span></span></li>
+          </Rows>
+        </Table>
+        {!meta.judge?.model && <p className="muted" data-in="col">Add ANTHROPIC_API_KEY to the .env file next to the helper and restart it: Claude then picks the moments and the expressions in them (about a cent or two an hour of stream).</p>}
+        {meta.judge?.error && <p className="muted" data-in="col">{meta.judge.error}</p>}
       </Section>
 
       <Section label="Speech">
@@ -57,9 +65,13 @@ export function Settings() {
           </Rows>
           {(meta.live ?? []).map(l => (
             <Rows key={l.id} label="Listening">
-              <li><span className="row"><span>{l.channel}</span><span className="muted">{length(l.heard)} · {count(l.caught, 'sentence')}</span></span></li>
+              <li><span className="row"><span>{l.channel}</span><span className="muted">{length(l.heard)} · {count(l.moments, 'moment')}</span></span></li>
             </Rows>
           ))}
+          <Rows label="At login">
+            <li><span className="row"><span>{meta.autostart ? 'Starts by itself' : 'Off'}</span>
+              <span className="muted">{meta.autostart ? 'earmark autostart off' : 'earmark autostart on'}</span></span></li>
+          </Rows>
         </Table>
         {engine?.error && <p className="muted" data-in="col">{engine.error}</p>}
       </Section>
@@ -78,7 +90,7 @@ export function Settings() {
         )}
       </Section>
 
-      <Section label="Your phrases">
+      <Section label="Your phrases (for the phrase list)">
         <form className="add" onSubmit={add} data-in="col">
           <input className="field" value={phrase} onChange={e => setPhrase(e.target.value)} placeholder="end up …ing" aria-label="A phrase to listen for" maxLength={120} />
           <button className="btn btn-solo" type="submit"><PlusIcon /><span>Add</span></button>

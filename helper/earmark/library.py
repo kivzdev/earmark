@@ -1,11 +1,13 @@
-"""Everything Earmark keeps: streams watched, phrases caught, and the clips they came with.
+"""Everything Earmark keeps: the streams you watched, cut into one-minute moments with their transcript and video,
+the moments worth keeping, and the expressions in them.
 
-One SQLite file plus a media folder. `export()` gives the whole library as the JSON
-the dashboard reads, locally and in the cloud copy.
+One SQLite file plus a media folder. `export()` gives the whole library as the JSON the dashboard reads, locally and
+in the online copy.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import threading
@@ -13,7 +15,6 @@ import time
 from pathlib import Path
 
 from .categories import classify
-from .patterns import Pattern
 
 SCHEMA = """
 create table if not exists sessions (
@@ -31,31 +32,47 @@ create table if not exists sessions (
   heard real not null default 0,
   words integer not null default 0
 );
-create table if not exists catches (
-  id text primary key,
-  session_id text not null references sessions(id) on delete cascade,
-  pattern text not null,
-  sentence text not null,
-  match_start integer not null,
-  match_end integer not null,
-  words text,
-  t0 real not null,
-  t1 real not null,
-  at real not null,
-  clip text,
-  poster text,
-  duration real,
-  starred integer not null default 0,
-  synced integer not null default 0
-);
-create index if not exists catches_pattern on catches(pattern);
-create index if not exists catches_session on catches(session_id);
-create index if not exists catches_clip on catches(clip);
 create table if not exists channels (
   login text primary key,
   display_name text,
-  group_override text
+  group_override text,
+  avatar text
 );
+create table if not exists categories (
+  name text primary key,
+  box_art text,
+  updated real
+);
+create table if not exists moments (
+  id text primary key,
+  session_id text not null references sessions(id) on delete cascade,
+  t0 real not null,
+  t1 real not null,
+  at real not null,
+  sentences text not null,
+  clip text,
+  poster text,
+  thumb text,
+  title text,
+  score real,
+  picked integer not null default 0,
+  starred integer not null default 0,
+  judged integer not null default 0,
+  synced integer not null default 0
+);
+create index if not exists moments_session on moments(session_id);
+create index if not exists moments_at on moments(at);
+create table if not exists expressions (
+  moment_id text not null references moments(id) on delete cascade,
+  key text not null,
+  text text not null,
+  note text,
+  sentence integer not null,
+  a integer not null,
+  b integer not null
+);
+create index if not exists expressions_moment on expressions(moment_id);
+create index if not exists expressions_key on expressions(key);
 create table if not exists custom_patterns (
   id text primary key,
   label text not null,
@@ -65,6 +82,9 @@ create table if not exists custom_patterns (
   created_at real not null
 );
 """
+
+# the first version kept one clip per caught phrase; moments replaced it
+MIGRATE = ["drop table if exists catches", "alter table channels add column avatar text"]
 
 
 def vod_link(vod_id: str | None, offset: float | None, t: float) -> str | None:
@@ -86,6 +106,11 @@ class Library:
             self._db.execute("pragma journal_mode=wal")
             self._db.execute("pragma foreign_keys=on")
             self._db.executescript(SCHEMA)
+            for sql in MIGRATE:
+                try:
+                    self._db.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # already done
 
     def _run(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -94,7 +119,7 @@ class Library:
     def _touch(self) -> None:
         self.changed_at = time.time()
 
-    # streams --------------------------------------------------------------
+    # streams ----------------------------------------------------------------------------------------------------
     def add_session(self, s: dict) -> None:
         self._run(
             "insert into sessions (id, channel, display_name, category, title, tags, kind, vod_id, vod_offset, started_at)"
@@ -130,82 +155,127 @@ class Library:
         )
         self._touch()
 
-    # phrases --------------------------------------------------------------
-    def add_catch(self, c: dict) -> None:
+    def set_channel_avatar(self, login: str, avatar: str | None, display_name: str | None = None) -> None:
         self._run(
-            "insert into catches (id, session_id, pattern, sentence, match_start, match_end, words, t0, t1, at, duration)"
-            " values (?,?,?,?,?,?,?,?,?,?,?)",
-            (c["id"], c["sessionId"], c["pattern"], c["sentence"], c["match"][0], c["match"][1],
-             json.dumps(c["words"]), c["t0"], c["t1"], c["at"], c["t1"] - c["t0"]),
+            "insert into channels (login, avatar, display_name) values (?, ?, ?) on conflict(login) do update set"
+            " avatar = coalesce(excluded.avatar, avatar), display_name = coalesce(excluded.display_name, display_name)",
+            (login, avatar, display_name),
         )
         self._touch()
 
-    def attach_clip(self, ids: list[str], clip: str | None, poster: str | None) -> None:
-        with self._lock:
-            for cid in ids:
-                self._db.execute("update catches set clip = ?, poster = ? where id = ?", (clip, poster, cid))
+    def set_box_art(self, category: str, url: str | None) -> None:
+        self._run(
+            "insert into categories (name, box_art, updated) values (?, ?, ?)"
+            " on conflict(name) do update set box_art = excluded.box_art, updated = excluded.updated",
+            (category, url, time.time()),
+        )
         self._touch()
 
-    def count(self, pattern: str, channel: str, with_clip: bool) -> int:
-        row = self._run(
-            "select count(*) from catches c join sessions s on s.id = c.session_id"
-            " where c.pattern = ? and s.channel = ?" + (" and c.clip is not null" if with_clip else ""),
-            (pattern, channel),
-        ).fetchone()
-        return row[0]
+    def needs_art(self) -> tuple[list[str], list[str]]:
+        """Categories without box art and channels without an avatar."""
+        cats = [r[0] for r in self._run(
+            "select distinct s.category from sessions s left join categories c on c.name = s.category"
+            " where s.category is not null and (c.box_art is null or c.box_art = '')").fetchall()]
+        chans = [r[0] for r in self._run("select login from channels where avatar is null or avatar = ''").fetchall()]
+        return cats, chans
 
-    def seen_sentence(self, pattern: str, channel: str, sentence: str) -> bool:
-        row = self._run(
-            "select 1 from catches c join sessions s on s.id = c.session_id"
-            " where c.pattern = ? and s.channel = ? and lower(c.sentence) = lower(?) limit 1",
-            (pattern, channel, sentence),
-        ).fetchone()
-        return row is not None
+    # moments ----------------------------------------------------------------------------------------------------
+    def add_moment(self, m: dict) -> None:
+        self._run(
+            "insert into moments (id, session_id, t0, t1, at, sentences) values (?,?,?,?,?,?)",
+            (m["id"], m["sessionId"], m["t0"], m["t1"], m["at"], json.dumps(m["sentences"], separators=(",", ":"))),
+        )
+        self._touch()
 
-    def update_catch(self, cid: str, starred: bool | None = None) -> bool:
-        if starred is None:
-            return False
-        cur = self._run("update catches set starred = ? where id = ?", (int(starred), cid))
+    def attach_media(self, mid: str, clip: str | None, poster: str | None, thumb: str | None) -> None:
+        self._run("update moments set clip = ?, poster = ?, thumb = ? where id = ?", (clip, poster, thumb, mid))
+        self._touch()
+
+    def unjudged_moments(self) -> list[str]:
+        return [r[0] for r in self._run("select id from moments where judged = 0 order by at").fetchall()]
+
+    def moment_for_judging(self, mid: str) -> dict | None:
+        row = self._run(
+            "select m.sentences, s.display_name, s.channel, s.category from moments m join sessions s on s.id = m.session_id"
+            " where m.id = ?", (mid,)).fetchone()
+        if not row:
+            return None
+        return {"sentences": json.loads(row["sentences"]), "displayName": row["display_name"] or row["channel"],
+                "category": row["category"]}
+
+    def judged(self, mid: str, title: str, score: float, picked: bool, expressions: list[dict], how: int) -> None:
+        with self._lock:
+            self._db.execute("delete from expressions where moment_id = ?", (mid,))
+            for e in expressions:
+                self._db.execute(
+                    "insert into expressions (moment_id, key, text, note, sentence, a, b) values (?,?,?,?,?,?,?)",
+                    (mid, e["key"], e["text"], e.get("note") or "", e["sentence"], e["a"], e["b"]))
+            self._db.execute("update moments set title = ?, score = ?, picked = ?, judged = ? where id = ?",
+                             (title, score, int(picked), how, mid))
+        self._touch()
+
+    def star(self, mid: str, starred: bool) -> bool:
+        cur = self._run("update moments set starred = ? where id = ?", (int(starred), mid))
         self._touch()
         return cur.rowcount > 0
 
-    def delete_catch(self, cid: str) -> bool:
+    def delete_moment(self, mid: str) -> bool:
         with self._lock:
-            row = self._db.execute("select clip, poster from catches where id = ?", (cid,)).fetchone()
+            row = self._db.execute("select clip, poster, thumb from moments where id = ?", (mid,)).fetchone()
             if not row:
                 return False
-            self._db.execute("delete from catches where id = ?", (cid,))
-            for rel in (row["clip"], row["poster"]):
-                if rel and not self._db.execute(
-                    "select 1 from catches where clip = ? or poster = ? limit 1", (rel, rel)
-                ).fetchone():
-                    (self.media / rel).unlink(missing_ok=True)
+            self._db.execute("delete from moments where id = ?", (mid,))
+        for rel in row:
+            if rel:
+                (self.media / rel).unlink(missing_ok=True)
         self._touch()
         return True
 
-    # sync bookkeeping -----------------------------------------------------
-    def unsynced_clips(self, limit: int) -> list[sqlite3.Row]:
-        """Starred first, then newest: if the daily allowance runs out, old clips wait."""
+    def recent_moments(self, session_id: str, n: int = 5) -> list[dict]:
+        rows = self._run("select id, title, picked, at, sentences from moments where session_id = ? order by at desc limit ?",
+                         (session_id, n)).fetchall()
+        out = []
+        for r in rows:
+            first = (json.loads(r["sentences"]) or [{"text": ""}])[0]["text"]
+            exprs = [e[0] for e in self._run("select text from expressions where moment_id = ?", (r["id"],)).fetchall()]
+            out.append({"id": r["id"], "title": r["title"], "picked": bool(r["picked"]), "at": r["at"], "first": first,
+                        "expressions": exprs[:4]})
+        return out
+
+    def forget_old_media(self, before: float) -> int:
+        """Drop the video of moments nobody kept once they're old; their transcript stays."""
+        with self._lock:
+            rows = self._db.execute(
+                "select id, clip, poster, thumb from moments where picked = 0 and starred = 0 and at < ? and clip is not null",
+                (before,)).fetchall()
+            for r in rows:
+                self._db.execute("update moments set clip = null, poster = null, thumb = null where id = ?", (r["id"],))
+        for r in rows:
+            for rel in (r["clip"], r["poster"], r["thumb"]):
+                if rel:
+                    (self.media / rel).unlink(missing_ok=True)
+        if rows:
+            self._touch()
+        return len(rows)
+
+    # the online copy's bookkeeping -------------------------------------------------------------------------------
+    def unsynced_kept(self, limit: int) -> list[sqlite3.Row]:
+        """Kept moments not uploaded yet: starred first, then newest."""
         return self._run(
-            "select clip, max(starred) as starred, max(at) as at from catches where clip is not null and synced = 0"
-            " group by clip order by max(starred) desc, max(at) desc limit ?",
-            (limit,),
-        ).fetchall()
+            "select id, clip from moments where (picked = 1 or starred = 1) and clip is not null and synced = 0"
+            " order by starred desc, at desc limit ?", (limit,)).fetchall()
 
-    def skip_stale_clips(self, before: float) -> None:
-        self._run("update catches set synced = 3 where synced = 0 and starred = 0 and clip is not null and at < ?",
-                  (before,))
+    def mark_synced(self, mid: str, state: int = 1) -> None:
+        self._run("update moments set synced = ? where id = ?", (state, mid))
 
-    def mark_synced(self, clip: str, state: int = 1) -> None:
-        self._run("update catches set synced = ? where clip = ?", (state, clip))
+    def synced_oldest_first(self) -> list[sqlite3.Row]:
+        return self._run("select id, clip, starred from moments where synced = 1 and clip is not null"
+                         " order by starred, at").fetchall()
 
-    def synced_clips_oldest_first(self) -> list[sqlite3.Row]:
-        return self._run(
-            "select clip, max(starred) as starred, min(at) as at from catches where synced = 1 and clip is not null"
-            " group by clip order by max(starred), min(at)"
-        ).fetchall()
+    def skip_stale(self, before: float) -> None:
+        self._run("update moments set synced = 3 where synced = 0 and starred = 0 and at < ?", (before,))
 
-    # your own phrases -----------------------------------------------------
+    # your own phrases (for the rules) -----------------------------------------------------------------------------
     def custom_patterns(self) -> list[dict]:
         return [dict(r) for r in self._run("select * from custom_patterns order by created_at").fetchall()]
 
@@ -221,68 +291,68 @@ class Library:
         self._touch()
         return cur.rowcount > 0
 
-    # the whole thing, as the dashboard reads it -----------------------------
-    def export(self, patterns: list[Pattern], cloud: bool = False) -> dict:
+    # the whole thing, as the dashboard reads it --------------------------------------------------------------------
+    def export(self, cloud: bool = False) -> dict:
         with self._lock:
             channels = {r["login"]: dict(r) for r in self._db.execute("select * from channels")}
+            arts = {r["name"]: r["box_art"] for r in self._db.execute("select * from categories")}
             sessions = [dict(r) for r in self._db.execute("select * from sessions order by started_at")]
-            catches = [dict(r) for r in self._db.execute("select * from catches order by at")]
+            if cloud:  # the copy carries every starred moment and the newest kept ones (its upload has a size limit)
+                moments = [dict(r) for r in self._db.execute(
+                    "select * from moments where starred = 1 or id in"
+                    " (select id from moments where picked = 1 order by at desc limit 250) order by at")]
+            else:
+                moments = [dict(r) for r in self._db.execute("select * from moments order by at")]
+            exprs: dict[str, list] = {}
+            for r in self._db.execute("select * from expressions"):
+                exprs.setdefault(r["moment_id"], []).append(
+                    {"key": r["key"], "text": r["text"], "note": r["note"], "s": r["sentence"], "a": r["a"], "b": r["b"]})
         out_sessions = {}
         for s in sessions:
-            tags = json.loads(s["tags"] or "[]")
-            group, game = classify(s["category"], s["title"], tags)
+            group, game = classify(s["category"], s["title"], json.loads(s["tags"] or "[]"))
             override = (channels.get(s["channel"]) or {}).get("group_override")
-            if override:
-                group = override
             out_sessions[s["id"]] = {
-                "id": s["id"],
-                "channel": s["channel"],
-                "displayName": s["display_name"] or s["channel"],
-                "category": s["category"],
-                "group": group,
-                "game": game if group == "gaming" else None,
-                "title": s["title"],
-                "kind": s["kind"],
-                "startedAt": s["started_at"],
-                "endedAt": s["ended_at"],
-                "heard": round(s["heard"] or 0, 1),
+                "id": s["id"], "channel": s["channel"], "displayName": s["display_name"] or s["channel"],
+                "category": s["category"], "group": override or group, "game": game if (override or group) == "gaming" else None,
+                "title": s["title"], "kind": s["kind"], "vodId": s["vod_id"],
+                "startedAt": s["started_at"], "endedAt": s["ended_at"], "heard": round(s["heard"] or 0, 1),
                 "words": s["words"] or 0,
             }
         vods = {s["id"]: (s["vod_id"], s["vod_offset"]) for s in sessions}
-        out_catches = []
-        for c in catches:
-            if c["session_id"] not in out_sessions:
+        out_moments = []
+        for m in moments:
+            if m["session_id"] not in out_sessions:
                 continue
-            vod_id, offset = vods[c["session_id"]]
             item = {
-                "id": c["id"],
-                "sessionId": c["session_id"],
-                "pattern": c["pattern"],
-                "sentence": c["sentence"],
-                "match": [c["match_start"], c["match_end"]],
-                "words": json.loads(c["words"] or "null"),
-                "at": c["at"],
-                "duration": round(c["duration"] or 0, 2),
-                "clip": c["clip"],
-                "poster": c["poster"],
-                "starred": bool(c["starred"]),
-                "vod": vod_link(vod_id, offset, c["t0"]),
+                "id": m["id"], "sessionId": m["session_id"], "at": m["at"], "duration": round(m["t1"] - m["t0"], 1),
+                "title": m["title"], "score": m["score"], "picked": bool(m["picked"]), "starred": bool(m["starred"]),
+                "judged": m["judged"], "clip": m["clip"], "poster": m["poster"],
+                "vod": vod_link(*vods[m["session_id"]], m["t0"]),
+                "sentences": json.loads(m["sentences"]), "expressions": exprs.get(m["id"], []),
             }
             if cloud:
-                # the cloud copy holds clips only (posters would double the uploads),
-                # and only the ones already uploaded
+                # the copy holds only uploaded clips; small posters ride along inside the JSON (an upload each
+                # would double the uploads the free plan allows)
                 item["poster"] = None
-                if c["synced"] != 1:
+                if m["synced"] != 1:
                     item["clip"] = None
-            out_catches.append(item)
+                thumb = self.media / m["thumb"] if m["thumb"] else None
+                item["thumb"] = ("data:image/jpeg;base64," + base64.b64encode(thumb.read_bytes()).decode()) \
+                    if thumb and thumb.is_file() else None
+            else:
+                item["thumb"] = m["thumb"]
+            out_moments.append(item)
+        if cloud:  # streams the copy has moments from, or that were watched in the last month
+            keep = {m["sessionId"] for m in out_moments}
+            month = time.time() - 31 * 86400
+            out_sessions = {k: v for k, v in out_sessions.items() if k in keep or v["startedAt"] > month}
+        cats = sorted({s["category"] for s in out_sessions.values() if s["category"]})
         return {
-            "version": 1,
+            "version": 2,
             "generatedAt": time.time(),
-            "patterns": [p.public() for p in patterns],
             "sessions": list(out_sessions.values()),
-            "catches": out_catches,
-            "channels": [
-                {"login": k, "displayName": v["display_name"] or k, "group": v["group_override"]}
-                for k, v in channels.items()
-            ],
+            "moments": out_moments,
+            "channels": [{"login": k, "displayName": v["display_name"] or k, "group": v["group_override"],
+                          "avatar": v.get("avatar")} for k, v in channels.items()],
+            "categories": [{"name": c, "boxArt": arts.get(c)} for c in cats],
         }

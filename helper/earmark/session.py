@@ -1,4 +1,5 @@
-"""One watched stream: audio comes in, sentences come out, phrases get caught and clipped."""
+"""One watched stream: audio comes in, sentences come out, and every minute or so of them becomes a moment —
+its video, its transcript word by word — for the judge to keep or let go."""
 
 from __future__ import annotations
 
@@ -13,7 +14,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from . import patterns as P
 from .categories import classify
 from .media import Recorder
 
@@ -27,11 +27,10 @@ TAIL = 2.5  # words this close to the end of a window may still change
 CONTEXT = 0.3
 GAP = 1.2  # a pause this long ends a sentence
 LONGEST = 20.0  # longer sentences split at the next short pause
-PAD_BEFORE, PAD_AFTER = 0.35, 0.6
-CLIP_MAX = 12.0
-CLIP_EVERY = 3.0  # at most one new clip per this many seconds of stream
-CLIP_CAP = {3: 4, 2: 3, 1: 2}  # clips kept per phrase per streamer, by how interesting the phrase is
-TEXT_CAP = 25  # sentences kept per phrase per streamer, clipped or not
+PAD_BEFORE, PAD_AFTER = 0.4, 0.6
+MOMENT = 55.0  # a moment closes at the first sentence end after this long
+MOMENT_MIN = 12.0  # less speech than this isn't a moment
+QUIET = 15.0  # a silence this long (music, a menu) ends a moment early
 
 END = re.compile(r"[.?!][\"')\]]*$")
 
@@ -107,15 +106,14 @@ class Session:
         self.last_seen = time.time()
         self.seq = 0
         self.words = 0
+        self.moments = 0
         self.error: str | None = None
-        self.recent: list[dict] = []  # newest catches, for the extension popup
-        self.caught = 0
         self._ending = threading.Event()
         self._ffmpeg_done = threading.Event()
         self._pending: dict[str, float] = {}  # clip job id → start time it still needs
         self._pending_lock = threading.Lock()
-        self._last_clip = -1e9
-        self._last_end = 0.0
+        self._sentences: list[list[tuple[str, float, float]]] = []  # the moment being gathered
+        self._last_moment_end = 0.0
         self.pcm = PcmRing()
         self.dir = app.settings.home / "buffer" / sid
         day = datetime.now().strftime("%Y-%m-%d")
@@ -179,11 +177,8 @@ class Session:
                     if early:
                         commit = [early]
                 for i, s in enumerate(commit):
-                    # neighbours bound the clip's padding, so it doesn't pick up their words
-                    before = commit[i - 1][-1][2] if i else self._last_end
                     after = sentences[i + 1][0][1] if i + 1 < len(sentences) else None
-                    self._on_sentence(s, before, after)
-                    self._last_end = s[-1][2]
+                    self._on_sentence(s, after)
                 if commit:
                     pos = commit[-1][-1][2]
                     self.app.library.update_session(self.id, heard=self.pcm.end, words=self.words)
@@ -200,64 +195,46 @@ class Session:
 
     def _forget_segments(self, pos: float) -> None:
         with self._pending_lock:
-            keep = min([pos - 10, *self._pending.values()])
+            keep = min([pos - 10, (self._sentences[0][0][1] if self._sentences else pos) - 2, *self._pending.values()])
         self.recorder.forget_before(keep - 2)
 
-    def _on_sentence(self, words: list[tuple[str, float, float]], before: float, after: float | None) -> None:
-        text, spans = _sentence_text(words)
+    # sentences → moments ----------------------------------------------------------------------------------------
+    def _on_sentence(self, words: list[tuple[str, float, float]], after: float | None) -> None:
+        text, _ = _sentence_text(words)
         self.words += len(words)
         with self._transcript.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"t0": round(words[0][1], 2), "t1": round(words[-1][2], 2), "text": text}) + "\n")
-        hits = P.find(self.app.patterns(), text)
-        if not hits:
+        if self._sentences and words[0][1] - self._sentences[-1][-1][2] > QUIET:
+            self._close_moment(words[0][1])
+        self._sentences.append(words)
+        if words[-1][2] - self._sentences[0][0][1] >= MOMENT:
+            self._close_moment(after)
+
+    def _close_moment(self, next_start: float | None) -> None:
+        sentences, self._sentences = self._sentences, []
+        if not sentences:
             return
-        lib = self.app.library
-        keep = []
-        for pattern, a, b in hits:
-            if lib.count(pattern.id, self.channel, with_clip=False) >= TEXT_CAP:
-                continue
-            if lib.seen_sentence(pattern.id, self.channel, text):
-                continue
-            keep.append((pattern, a, b))
-        if not keep:
+        s0, s1 = sentences[0][0][1], sentences[-1][-1][2]
+        if s1 - s0 < MOMENT_MIN:
             return
-        keep.sort(key=lambda h: -h[0].weight)
-        s_start, s_end = words[0][1], words[-1][2]
-        # the clip is the sentence, trimmed around the best phrase if it runs long
-        best, a, b = keep[0]
-        idx = [i for i, (x, y) in enumerate(spans) if y > a and x < b] or [0]
-        m0, m1 = words[idx[0]][1], words[idx[-1]][2]
-        t0, t1 = s_start, s_end
-        if t1 - t0 > CLIP_MAX:
-            t0 = max(s_start, min(m0 - 4.0, s_end - CLIP_MAX))
-            t1 = min(s_end, t0 + CLIP_MAX)
-        if t0 == s_start:
-            t0 -= min(PAD_BEFORE, max(0.05, s_start - before - 0.05))
-        if t1 == s_end:
-            t1 += PAD_AFTER if after is None else min(PAD_AFTER, max(0.08, after - s_end - 0.05))
-        t0 = max(0.0, t0)
-        want_clip = t0 - self._last_clip >= CLIP_EVERY and any(
-            lib.count(p.id, self.channel, with_clip=True) < CLIP_CAP.get(p.weight, 2) for p, _, _ in keep
-        )
-        at = self.started + t0  # close enough: stream time maps to wall time
-        rel_words = [[w, round(s - t0, 2), round(e - t0, 2)] for w, s, e in words if s >= t0 - 0.05 and e <= t1 + 0.05]
-        ids = []
-        for pattern, a, b in keep:
-            cid = uuid.uuid4().hex[:12]
-            ids.append(cid)
-            lib.add_catch({
-                "id": cid, "sessionId": self.id, "pattern": pattern.id, "sentence": text, "match": [a, b],
-                "words": rel_words, "t0": round(t0, 2), "t1": round(t1, 2), "at": at,
-            })
-            self.caught += 1
-            self.recent.insert(0, {"id": cid, "pattern": pattern.label, "sentence": text, "match": [a, b], "at": at})
-        del self.recent[12:]
-        if want_clip:
-            self._last_clip = t0
-            job = uuid.uuid4().hex[:8]
-            with self._pending_lock:
-                self._pending[job] = t0
-            self.app.clipper.add(self, job, ids, t0, t1, m0)
+        # padding that stops short of the neighbours' words
+        t0 = max(0.0, s0 - min(PAD_BEFORE, max(0.05, s0 - self._last_moment_end - 0.05)))
+        t1 = s1 + (PAD_AFTER if next_start is None else min(PAD_AFTER, max(0.08, next_start - s1 - 0.05)))
+        self._last_moment_end = t1
+        mid = uuid.uuid4().hex[:12]
+        self.app.library.add_moment({
+            "id": mid, "sessionId": self.id, "t0": round(t0, 2), "t1": round(t1, 2), "at": self.started + t0,
+            "sentences": [{
+                "t0": round(ws[0][1] - t0, 2), "t1": round(ws[-1][2] - t0, 2), "text": _sentence_text(ws)[0],
+                "words": [[w, round(a - t0, 2), round(b - t0, 2)] for w, a, b in ws],
+            } for ws in sentences],
+        })
+        self.moments += 1
+        job = uuid.uuid4().hex[:8]
+        with self._pending_lock:
+            self._pending[job] = t0
+        self.app.clipper.add(self, job, mid, t0, t1)
+        self.app.judge.add(mid)
 
     def clip_done(self, job: str) -> None:
         with self._pending_lock:
@@ -271,9 +248,10 @@ class Session:
     # done -------------------------------------------------------------------
     def _finish(self) -> None:
         self._ending.set()
+        self._close_moment(None)
         self.recorder.close()
         self.recorder.wait()
-        deadline = time.time() + 120
+        deadline = time.time() + 180
         while self.clips_pending and time.time() < deadline:
             time.sleep(0.5)
         self.app.library.update_session(self.id, endedAt=time.time(), heard=self.pcm.end, words=self.words)
@@ -289,8 +267,8 @@ class Session:
             "game": game,
             "heard": round(self.pcm.end, 1),
             "words": self.words,
-            "caught": self.caught,
-            "recent": self.recent[:5],
+            "moments": self.moments,
+            "recent": self.app.library.recent_moments(self.id, 4),
             "error": self.error,
             "ending": self.ending,
         }

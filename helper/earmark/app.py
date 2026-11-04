@@ -1,4 +1,4 @@
-"""The running helper: library, speech engine, live streams, clip cutting, pairing, sync."""
+"""The running helper: library, speech engine, live streams, clip cutting, the judge, Twitch's pictures, pairing, sync."""
 
 from __future__ import annotations
 
@@ -12,28 +12,30 @@ from datetime import datetime
 from . import __version__
 from .asr import Engine
 from .config import Settings, extension_token
+from .judge import Judge
 from .library import Library
 from .media import cut
 from .patterns import Pattern, builtin, custom
 from .session import Session
+from .twitch import Twitch
 
 
 class Clipper:
-    """Cuts clips one at a time, so a burst of phrases never starts a pile of ffmpegs."""
+    """Cuts moments one at a time, so a burst of them never starts a pile of ffmpegs."""
 
     def __init__(self, app: "App"):
         self.app = app
         self._q: queue.Queue = queue.Queue()
         threading.Thread(target=self._run, name="clipper", daemon=True).start()
 
-    def add(self, session: Session, job: str, ids: list[str], t0: float, t1: float, poster_at: float) -> None:
-        self._q.put((session, job, ids, t0, t1, poster_at))
+    def add(self, session: Session, job: str, mid: str, t0: float, t1: float) -> None:
+        self._q.put((session, job, mid, t0, t1))
 
     def _run(self) -> None:
         while True:
-            session, job, ids, t0, t1, poster_at = self._q.get()
+            session, job, mid, t0, t1 = self._q.get()
             try:
-                deadline = time.time() + 30
+                deadline = time.time() + 40
                 segments = session.recorder.segments()
                 while time.time() < deadline and session.recorder.alive:
                     if segments and segments[-1][2] >= t1:
@@ -42,11 +44,12 @@ class Clipper:
                     segments = session.recorder.segments()
                 segments = session.recorder.segments()
                 day = datetime.fromtimestamp(session.started + t0)
-                clip = f"clips/{day:%Y/%m}/{ids[0]}.mp4"
-                poster = f"posters/{day:%Y/%m}/{ids[0]}.jpg"
+                clip, poster, thumb = (f"{kind}/{day:%Y/%m}/{mid}.{ext}" for kind, ext in
+                                       (("clips", "mp4"), ("posters", "jpg"), ("thumbs", "jpg")))
                 media = self.app.settings.media
-                if cut(segments, t0, t1, media / clip, media / poster, poster_at):
-                    self.app.library.attach_clip(ids, clip, poster if (media / poster).exists() else None)
+                if cut(segments, t0, t1, media / clip, media / poster, t0 + min(4.0, (t1 - t0) / 3), media / thumb):
+                    self.app.library.attach_media(mid, clip, poster if (media / poster).exists() else None,
+                                                  thumb if (media / thumb).exists() else None)
                     if self.app.sync:
                         self.app.sync.poke()
             except Exception as error:
@@ -62,6 +65,7 @@ class App:
         self.library = Library(settings.db_path, settings.media)
         self.engine = Engine(settings)
         self.token = extension_token(settings.home)
+        self.twitch = Twitch()
         self.sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
         self._patterns: list[Pattern] | None = None
@@ -72,9 +76,11 @@ class App:
             from .sync import Sync
 
             self.sync = Sync(self)
+        self.judge = Judge(self)
         threading.Thread(target=self._reaper, name="reaper", daemon=True).start()
+        threading.Thread(target=self._housekeeping, name="housekeeping", daemon=True).start()
 
-    # phrases -----------------------------------------------------------------
+    # phrases (the rules the judge falls back on) ------------------------------------------------------------------
     def patterns(self) -> list[Pattern]:
         if self._patterns is None:
             self._patterns = builtin() + custom(self.library.custom_patterns())
@@ -83,7 +89,7 @@ class App:
     def patterns_changed(self) -> None:
         self._patterns = None
 
-    # streams -----------------------------------------------------------------
+    # streams -----------------------------------------------------------------------------------------------------
     def start_session(self, meta: dict) -> Session:
         sid = uuid.uuid4().hex[:12]
         channel = str(meta.get("channel") or "").lower()[:40]
@@ -103,6 +109,7 @@ class App:
         session = Session(self, sid, clean)
         with self._lock:
             self.sessions[sid] = session
+        threading.Thread(target=self.fetch_art, name="art", daemon=True).start()
         return session
 
     def session(self, sid: str) -> Session | None:
@@ -125,15 +132,38 @@ class App:
                 if not s.ending and time.time() - s.last_seen > 45:
                     s.end()
 
-    # pairing the extension ---------------------------------------------------
-    def pair_request(self, origin: str) -> str:
+    # Twitch's pictures, and tidying up ----------------------------------------------------------------------------
+    def fetch_art(self) -> None:
+        cats, chans = self.library.needs_art()
+        for c in cats:
+            url = self.twitch.box_art(c)
+            if url:
+                self.library.set_box_art(c, url)
+        if chans:
+            for login, info in self.twitch.channels(chans).items():
+                self.library.set_channel_avatar(login, info.get("avatar"), info.get("displayName"))
+
+    def _housekeeping(self) -> None:
+        time.sleep(20)
+        while True:
+            try:
+                self.fetch_art()
+                self.library.forget_old_media(time.time() - self.settings.keep_days * 86400)
+            except Exception:
+                pass
+            time.sleep(6 * 3600)
+
+    # pairing the extension -----------------------------------------------------------------------------------------
+    def pair_request(self, origin: str) -> dict:
         now = time.time()
         self.pairing = {k: v for k, v in self.pairing.items() if now - v["created"] < 600}
         if sum(1 for v in self.pairing.values() if v["state"] == "pending") >= 5:
             raise ValueError("too many pending requests")
         rid = secrets.token_urlsafe(9)
-        self.pairing[rid] = {"origin": origin, "created": now, "state": "pending"}
-        return rid
+        # by default the extension connects by itself; with EARMARK_AUTO_PAIR=0 you allow it on the dashboard
+        state = "allowed" if self.settings.auto_pair and origin.startswith("chrome-extension://") else "pending"
+        self.pairing[rid] = {"origin": origin, "created": now, "state": state}
+        return {"id": rid, "state": state}
 
     def pair_answer(self, rid: str, allow: bool) -> bool:
         req = self.pairing.get(rid)
@@ -159,11 +189,13 @@ class App:
             if v["state"] == "pending" and now - v["created"] < 600
         ]
 
-    # status --------------------------------------------------------------------
+    # status ----------------------------------------------------------------------------------------------------------
     def engine_status(self) -> dict:
         return {"name": self.engine.name, "ready": self.engine.ready, "error": self.engine.error}
 
     def status(self) -> dict:
         with self._lock:
             live = [s.status() for s in self.sessions.values()]
-        return {"version": self.version, "engine": self.engine_status(), "sessions": live}
+        site = self.settings.sync_url or f"http://127.0.0.1:{self.settings.port}"
+        return {"version": self.version, "engine": self.engine_status(), "judge": self.judge.status(),
+                "sessions": live, "site": site}
