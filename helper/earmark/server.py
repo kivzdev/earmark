@@ -276,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
             if group is not None and group not in GROUPS:
                 return self._error(400, "group must be politics, entertainment or gaming")
             app.library.set_channel_group(m[1], group)
+            if app.sync:  # the online copy sorts it the same way right away
+                app.sync.poke(snapshot=True)
             return self._json(200, {"ok": True})
         m = re.fullmatch(r"/api/pairing/([\w-]{6,20})", path)
         if m and method == "POST":
