@@ -82,7 +82,7 @@ def _listen(args) -> int:
     # the extension sends WebM; make the file look the same
     enc = subprocess.Popen(
         [ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin", "-i", args.file,
-         "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-b:v", "1M", "-vf", "scale=-2:360",
+         "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-b:v", "3M", "-vf", "scale=-2:'min(720,ih)'",
          "-c:a", "libopus", "-b:a", "96k", "-f", "webm", "pipe:1"],
         stdout=subprocess.PIPE,
     )

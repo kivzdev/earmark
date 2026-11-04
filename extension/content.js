@@ -14,7 +14,7 @@
     '中文', 'العربية', 'nederlands', 'svenska', 'čeština', 'magyar', 'română', 'suomi', 'dansk', 'norsk', 'ελληνικά',
     'українська', 'ไทย', 'tiếng việt', 'bahasa indonesia', 'filipino', 'हिन्दी', 'català', 'slovenčina', 'български',
   ])
-  const W = 640, H = 360
+  const MAX_H = 720 // the helper keeps 720p: what the clips play back at
 
   let port = null
   let settings = { paired: false, paused: false }
@@ -149,7 +149,9 @@
     const src = video.captureStream()
     const audio = src.getAudioTracks()[0]
     if (!audio) { src.getTracks().forEach(t => t.stop()); reason = 'no-audio'; return }
-    // a small copy of the picture: the helper only keeps 360p, so the browser doesn't encode a 1080p60 stream
+    // a copy of the picture at up to 720p (the browser doesn't encode the full 1080p60 stream), 16:9
+    const H = Math.min(MAX_H, Math.max(360, Math.round((video.videoHeight || MAX_H) / 2) * 2))
+    const W = Math.round((H * 16) / 9 / 2) * 2
     const canvas = document.createElement('canvas')
     canvas.width = W
     canvas.height = H
@@ -171,8 +173,9 @@
     draw(performance.now())
     r.canvasTrack = canvas.captureStream(30).getVideoTracks()[0]
     const stream = new MediaStream([r.canvasTrack, audio])
-    const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t))
-    r.recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_200_000, audioBitsPerSecond: 128_000 })
+    // H.264 first: on a Mac Chrome hands it to the hardware encoder, so 720p costs next to nothing
+    const mimeType = ['video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t))
+    r.recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 3_000_000, audioBitsPerSecond: 128_000 })
     r.recorder.ondataavailable = async e => {
       if (!e.data.size) return
       r.queue.push(b64(await e.data.arrayBuffer()))

@@ -1,8 +1,10 @@
 """Optional cloud copy of the library (the `/cloud` app in this repository).
 
-The moments worth keeping are uploaded newest first (starred ones before), a couple of dozen a day at most, and the oldest ones
-are removed from the cloud again when the copy grows past its budget. Your own
-computer keeps everything; the cloud only mirrors it.
+The moments worth keeping are uploaded newest first (starred ones before): the clip in both sizes (720p and 360p) and
+its thumbnail. Every file and every snapshot of the library counts against a day's uploads (50 by default: in any month
+well under the 2,000 Vercel's free plan includes, and going over it locks the storage for 30 days); what doesn't fit
+waits for the next day. When the copy grows past its budget, older moments step down to the 360p clip, then to their
+thumbnail and transcript. Your own computer keeps everything; the cloud only mirrors it.
 """
 
 from __future__ import annotations
@@ -15,6 +17,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date
+
+from .library import CLOUD_LEVEL
+
+SMALL = 4 * 1024 * 1024  # what one request to the copy may carry (Vercel stops at 4.5 MB); bigger files go to its storage
+STATE = {level: state for state, level in CLOUD_LEVEL.items()}
+SNAPSHOT_EVERY = 1800  # seconds between snapshots of a library that keeps changing
+FOR_SNAPSHOTS = 10  # of a day's uploads, kept for the snapshots
 
 
 class Sync:
@@ -42,7 +51,7 @@ class Sync:
         return {
             "url": self.url,
             "uploadedToday": self.state["uploaded"] if self.state["day"] == date.today().isoformat() else 0,
-            "perDay": self.app.settings.sync_clips_per_day,
+            "perDay": self.app.settings.sync_uploads_per_day,
             "lastOk": self.state["lastOk"],
             "error": self.state["error"],
         }
@@ -54,6 +63,9 @@ class Sync:
             pass
 
     def _call(self, method: str, path: str, body: bytes = b"", headers: dict | None = None) -> int:
+        return self._ask(method, path, body, headers)[0]
+
+    def _ask(self, method: str, path: str, body: bytes = b"", headers: dict | None = None) -> tuple[int, dict]:
         request = urllib.request.Request(
             self.url + path,
             data=body if method in ("PUT", "POST") else None,
@@ -62,9 +74,43 @@ class Sync:
         )
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
-                return response.status
+                raw = response.read()
+                try:
+                    return response.status, json.loads(raw or b"{}")
+                except ValueError:
+                    return response.status, {}
         except urllib.error.HTTPError as error:
-            return error.code
+            return error.code, {}
+
+    def _put(self, rel: str, path, kind: str) -> int:
+        """One file up; a big one straight to the copy's storage, on a link the copy signs for it alone."""
+        body = path.read_bytes()
+        self.state["uploaded"] += 1  # (counted as tried: storage may have taken it even when the answer is lost)
+        where = urllib.parse.quote(rel)
+        if len(body) > SMALL:
+            code, ticket = self._ask("POST", f"/api/sync/upload?path={where}&size={len(body)}")
+            if code == 200 and str(ticket.get("url", "")).startswith("https://"):
+                # (the storage's own address: the sync token isn't sent there)
+                request = urllib.request.Request(ticket["url"], data=body, method="PUT",
+                                                 headers={**ticket.get("headers", {}), "User-Agent": "earmark"})
+                try:
+                    with urllib.request.urlopen(request, timeout=300) as response:
+                        code = response.status
+                except urllib.error.HTTPError as error:
+                    code = error.code
+                if code != 200:
+                    raise RuntimeError(f"{rel}: the storage answered {code}")
+                # (it went past the copy: ask it to read the file back the way a player will)
+                code, held = self._ask("GET", f"/api/sync/check?path={where}")
+                if code != 200 or held.get("size") != len(body):
+                    raise RuntimeError(f"{rel}: the storage holds {held.get('size')} of {len(body)} bytes")
+                return len(body)
+            if code != 501:  # 501: storage without signed links (a folder), which takes it the usual way
+                raise RuntimeError(f"{rel}: the upload link answered {code}")
+        code = self._call("PUT", "/api/sync/clip?path=" + where, body, {"Content-Type": kind})
+        if code != 200:
+            raise RuntimeError(f"{rel}: the upload answered {code}")
+        return len(body)
 
     def _run(self) -> None:
         time.sleep(5)
@@ -85,42 +131,63 @@ class Sync:
         if self.state["day"] != today:
             self.state.update(day=today, uploaded=0)
         lib.skip_stale(time.time() - 7 * 86400)
-        changed = False
-        room = s.sync_clips_per_day - self.state["uploaded"]
-        for row in lib.unsynced_kept(max(0, room)):
-            path = s.media / row["clip"]
-            if not path.is_file():
+        # new moments, while the day's uploads last
+        for row in lib.unsynced_kept(100):
+            if not (s.media / row["clip"]).is_file():
                 lib.mark_synced(row["id"], 3)
                 continue
-            code = self._call("PUT", "/api/sync/clip?path=" + urllib.parse.quote(row["clip"]), path.read_bytes(),
-                              {"Content-Type": "video/mp4"})
-            if code != 200:
-                raise RuntimeError(f"clip upload answered {code}")
-            lib.mark_synced(row["id"], 1)
-            self.state["uploaded"] += 1
-            changed = True
-        # stay inside the budget: drop the oldest clips that aren't starred (they stay on this computer)
-        rows = lib.synced_oldest_first()
-        sizes = {r["id"]: (s.media / r["clip"]).stat().st_size if (s.media / r["clip"]).is_file() else 0 for r in rows}
-        total = sum(sizes.values())
-        budget = s.sync_budget_mb * 1024 * 1024
-        for r in rows:
-            if total <= budget:
+            files = [(rel, kind) for rel, kind in ((row["clip"], "video/mp4"), (row["low"], "video/mp4"),
+                                                   (row["thumb"], "image/jpeg")) if rel and (s.media / rel).is_file()]
+            if self.state["uploaded"] + len(files) > s.sync_uploads_per_day - FOR_SNAPSHOTS:
                 break
-            if r["starred"]:
-                continue
-            code = self._call("DELETE", "/api/sync/clip?path=" + urllib.parse.quote(r["clip"]))
-            if code not in (200, 404):
-                raise RuntimeError(f"clip delete answered {code}")
-            lib.mark_synced(r["id"], 2)
-            total -= sizes[r["id"]]
-            changed = True
-        stale = lib.changed_at > self.state["snapshotAt"]
-        if changed or (stale and (self._snapshot_due or time.time() - self.state["snapshotAt"] > 600)):
-            body = gzip.compress(json.dumps(lib.export(cloud=True), separators=(",", ":")).encode())
-            code = self._call("PUT", "/api/sync/library", body,
-                              {"Content-Type": "application/json", "Content-Encoding": "gzip"})
-            if code != 200:
-                raise RuntimeError(f"library upload answered {code}")
-            self.state["snapshotAt"] = time.time()
-            self._snapshot_due = False
+            size = sum(self._put(rel, s.media / rel, kind) for rel, kind in files)
+            lib.mark_synced(row["id"], 1, size)
+        # a snapshot of the library every half hour while it changes, and soon after a stream ends; what the budget
+        # no longer holds is let go once the snapshot that doesn't show it is up
+        plan = self._fit()
+        since = time.time() - self.state["snapshotAt"]
+        stale = lib.changed_at > self.state["snapshotAt"] or bool(plan)
+        due = not self.state["snapshotAt"] or since > SNAPSHOT_EVERY or (self._snapshot_due and since > 120)
+        if not (stale and due and self.state["uploaded"] < s.sync_uploads_per_day):
+            return
+        levels = {mid: state for mid, state, _ in plan}
+        body = gzip.compress(json.dumps(lib.export(cloud=True, levels=levels), separators=(",", ":")).encode())
+        self.state["uploaded"] += 1
+        code = self._call("PUT", "/api/sync/library", body, {"Content-Type": "application/json", "Content-Encoding": "gzip"})
+        if code != 200:
+            raise RuntimeError(f"library upload answered {code}")
+        self.state["snapshotAt"] = time.time()
+        self._snapshot_due = False
+        for mid, state, gone in plan:
+            for rel in gone:
+                code = self._call("DELETE", "/api/sync/clip?path=" + urllib.parse.quote(rel))
+                if code not in (200, 404):
+                    raise RuntimeError(f"{rel}: the delete answered {code}")
+            lib.mark_synced(mid, state)
+
+    def _fit(self) -> list[tuple[str, int, list[str]]]:
+        """What the copy lets go of to stay inside its budget, as (moment, its new sync state, files to delete): the
+        newest moments keep both sizes in the first half of it, starred ones anywhere in it; older ones step down to the
+        360p clip, then to their thumbnail and transcript."""
+        lib, s = self.app.library, self.app.settings
+        budget = s.sync_budget_mb * 1024 * 1024
+
+        def size(rel):
+            return (s.media / rel).stat().st_size if rel and (s.media / rel).is_file() else 0
+
+        used, plan = 0, []
+        for r in lib.in_cloud():
+            have = CLOUD_LEVEL[r["synced"]]
+            cost = {2: size(r["clip"]) + size(r["low"]) + size(r["thumb"]), 1: size(r["low"]) + size(r["thumb"]),
+                    0: size(r["thumb"])}
+            if have == 2 and used + cost[2] <= (budget if r["starred"] or not r["low"] else budget / 2):
+                level = 2  # (a clip with no 360p copy is all the video it has)
+            elif have >= 1 and r["low"] and used + cost[1] <= budget:
+                level = 1
+            else:
+                level = 0
+            used += cost[level]
+            if level < have:
+                gone = ([r["clip"]] if have == 2 else []) + ([r["low"]] if level == 0 else [])
+                plan.append((r["id"], STATE[level], [rel for rel in gone if rel]))
+        return plan

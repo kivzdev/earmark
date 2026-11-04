@@ -64,7 +64,7 @@ class Settings:
     # optional mirror of the library (see /cloud in the repository)
     sync_url: str
     sync_token: str
-    sync_clips_per_day: int
+    sync_uploads_per_day: int
     sync_budget_mb: int
     # Claude picks the good moments when there's a key; the phrase list does otherwise
     ai_key: str
@@ -109,12 +109,12 @@ def load() -> Settings:
         cloud_model=os.environ.get("EARMARK_CLOUD_ASR_MODEL", "whisper-large-v3-turbo"),
         sync_url=os.environ.get("EARMARK_SYNC_URL", "").rstrip("/"),
         sync_token=os.environ.get("EARMARK_SYNC_TOKEN", ""),
-        sync_clips_per_day=_int("EARMARK_SYNC_CLIPS_PER_DAY", 25),
+        sync_uploads_per_day=_int("EARMARK_SYNC_UPLOADS_PER_DAY", 50),
         sync_budget_mb=_int("EARMARK_SYNC_BUDGET_MB", 900),
         ai_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() if os.environ.get("EARMARK_AI", "on") != "off" else "",
         ai_model=os.environ.get("EARMARK_AI_MODEL", "claude-haiku-5-5"),
         auto_pair=os.environ.get("EARMARK_AUTO_PAIR", "1") != "0",
-        keep_days=_int("EARMARK_KEEP_DAYS", 14),
+        keep_days=_int("EARMARK_KEEP_DAYS", 7),
     )
 
 

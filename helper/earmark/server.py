@@ -309,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error(404, "not found")
 
     def _media(self, rel: str) -> None:
-        if not re.fullmatch(r"(clips/\d{4}/\d{2}/[a-f0-9]{12}\.mp4|(posters|thumbs)/\d{4}/\d{2}/[a-f0-9]{12}\.jpg)", rel):
+        if not re.fullmatch(r"(clips/\d{4}/\d{2}/[a-f0-9]{12}(\.low)?\.mp4|(posters|thumbs)/\d{4}/\d{2}/[a-f0-9]{12}\.jpg)", rel):
             return self._error(404, "not found")
         path = self.app.settings.media / rel
         if not path.is_file():

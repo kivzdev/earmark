@@ -8,6 +8,7 @@ segments on disk, so any moment from the last minute or two can be cut into a cl
 from __future__ import annotations
 
 import csv
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 SEGMENT = 2.0  # seconds per buffered segment
+LOW = 360  # the light copy's height
 
 
 def ffmpeg() -> str:
@@ -33,18 +35,33 @@ def _has_encoder(name: str) -> bool:
     return f" {name} " in out
 
 
-_ENCODER: list[str] | None = None
+_HARDWARE: bool | None = None
+_X264: bool | None = None
 
 
 def video_encoder(bitrate: str) -> list[str]:
-    """Hardware H.264 on Macs, x264 elsewhere."""
-    global _ENCODER
-    if _ENCODER is None:
-        if sys.platform == "darwin" and _has_encoder("h264_videotoolbox"):
-            _ENCODER = ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-profile:v", "main"]
-        else:
-            _ENCODER = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main"]
-    return [*_ENCODER, "-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bitrate, "-pix_fmt", "yuv420p"]
+    """The live stream's H.264: the Mac's hardware encoder, which keeps up with it for next to nothing; x264 elsewhere."""
+    global _HARDWARE
+    if _HARDWARE is None:
+        _HARDWARE = sys.platform == "darwin" and _has_encoder("h264_videotoolbox")
+    if _HARDWARE:
+        codec = ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-profile:v", "main"]
+    else:
+        codec = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main"]
+    return [*codec, "-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bitrate, "-pix_fmt", "yuv420p"]
+
+
+def clip_encoder(crf: int, cap: int) -> list[str]:
+    """A clip's H.264 (kept and watched): x264 at constant quality, up to `cap` kb/s. Next to the hardware encoder it
+    looks clearly better at the same size and keeps to it (the hardware one overshot 1 Mb/s by three quarters on a
+    busy game, at a worse picture); a quiet scene comes out smaller. 720p runs at about 16x real time on an M4."""
+    global _X264
+    if _X264 is None:
+        _X264 = _has_encoder("libx264")
+    if not _X264:
+        return video_encoder(f"{cap}k")
+    return ["-c:v", "libx264", "-preset", "faster", "-profile:v", "high", "-crf", str(crf),
+            "-maxrate", f"{cap}k", "-bufsize", f"{cap * 2}k", "-pix_fmt", "yuv420p"]
 
 
 class Recorder:
@@ -62,9 +79,9 @@ class Recorder:
             "-fflags", "+genpts+discardcorrupt", "-i", "pipe:0",
             # speech: mono 16 kHz, silence-padded so sample n is always at n / 16000 s
             "-map", "0:a:0", "-af", "aresample=16000:async=1:first_pts=0", "-ac", "1", "-f", "s16le", "pipe:1",
-            # clips: 360p segments, a keyframe every second so cuts stay cheap
-            "-map", "0:v:0?", "-map", "0:a:0", "-vf", "scale=-2:360,fps=30",
-            *video_encoder("1000k"), "-g", "30", "-force_key_frames", "expr:gte(t,n_forced*1)",
+            # clips: up-to-720p segments, a keyframe every second so cuts stay cheap
+            "-map", "0:v:0?", "-map", "0:a:0", "-vf", "scale=-2:'min(720,ih)',fps=30",
+            *video_encoder("2500k"), "-g", "30", "-force_key_frames", "expr:gte(t,n_forced*1)",
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
             "-f", "segment", "-segment_time", str(SEGMENT), "-segment_format", "mpegts",
             "-segment_list", str(self.list_path), "-segment_list_type", "csv", "-reset_timestamps", "0",
@@ -138,8 +155,8 @@ def cut(
     poster_at: float,
     thumb: Path | None = None,
 ) -> bool:
-    """Cut [t0, t1] (stream seconds) out of the buffered segments into a small MP4 (360p, speech-clear mono audio,
-    about 3.3 MB a minute), with a poster frame and a small thumbnail."""
+    """Cut [t0, t1] (stream seconds) out of the buffered segments into an MP4 (720p, clear mono speech, 4–12 MB a
+    minute as busy as the picture is), with a full-size poster frame and a 480 px thumbnail."""
     parts = [(p, s, e) for p, s, e in segments if e > t0 and s < t1 and p.exists()]
     if not parts:
         return False
@@ -152,8 +169,8 @@ def cut(
         ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-f", "concat", "-safe", "0", "-i", str(listing),
         "-ss", f"{start:.3f}", "-t", f"{t1 - t0:.3f}",
-        "-map", "0:v:0?", "-map", "0:a:0", *video_encoder("380k"), "-g", "60",
-        "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-movflags", "+faststart", str(tmp),
+        "-map", "0:v:0?", "-map", "0:a:0", *clip_encoder(23, 1500), "-g", "60",
+        "-c:a", "aac", "-b:a", "96k", "-ac", "1", "-movflags", "+faststart", str(tmp),
     ]
     try:
         done = subprocess.run(cmd, capture_output=True, timeout=60)
@@ -163,7 +180,7 @@ def cut(
         tmp.unlink(missing_ok=True)
         return False
     tmp.replace(out)
-    for path, size, quality in ((poster, None, "5"), (thumb, "256:-2", "9")):
+    for path, size, quality in ((poster, None, "4"), (thumb, "480:-2", "4")):
         if path is None:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,3 +191,32 @@ def cut(
             capture_output=True, timeout=30,
         )
     return True
+
+
+def low_copy(clip: Path, out: Path) -> bool:
+    """The clip again at 360p (2–4 MB a minute): the player's light choice, for slow connections, and what the
+    online copy keeps of older moments when its space runs short."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name.replace(".mp4", ".part.mp4"))
+    done = subprocess.run(
+        [ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(clip),
+         "-vf", f"scale=-2:{LOW}", *clip_encoder(26, 500), "-g", "60",
+         "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-movflags", "+faststart", str(tmp)],
+        capture_output=True, timeout=120,
+    )
+    if done.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 1000:
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(out)
+    return True
+
+
+def video_height(path: Path) -> int | None:
+    """how tall a video's picture is, from ffmpeg's description of the file"""
+    try:
+        done = subprocess.run([ffmpeg(), "-hide_banner", "-nostdin", "-i", str(path)],
+                              capture_output=True, text=True, timeout=20)
+    except Exception:
+        return None
+    m = re.search(r"Video: .*?, (\d{2,5})x(\d{2,5})[ ,]", done.stderr)
+    return int(m.group(2)) if m else None

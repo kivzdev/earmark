@@ -15,7 +15,7 @@ from .asr import Engine
 from .config import Settings, extension_token
 from .judge import Judge
 from .library import Library
-from .media import cut
+from .media import LOW, cut, low_copy, video_height
 from .patterns import Pattern, builtin, custom
 from .session import Session
 from .twitch import Twitch
@@ -51,12 +51,15 @@ class Clipper:
                     segments = session.recorder.segments()
                 segments = session.recorder.segments()
                 day = datetime.fromtimestamp(session.started + t0)
-                clip, poster, thumb = (f"{kind}/{day:%Y/%m}/{mid}.{ext}" for kind, ext in
-                                       (("clips", "mp4"), ("posters", "jpg"), ("thumbs", "jpg")))
+                clip, poster, thumb, low = (f"{kind}/{day:%Y/%m}/{mid}.{ext}" for kind, ext in
+                                            (("clips", "mp4"), ("posters", "jpg"), ("thumbs", "jpg"), ("clips", "low.mp4")))
                 media = self.app.settings.media
                 if cut(segments, t0, t1, media / clip, media / poster, t0 + min(4.0, (t1 - t0) / 3), media / thumb):
+                    # (a stream watched at 360p or less has nothing lighter to offer)
+                    height = video_height(media / clip)
+                    light = bool(height and height > LOW + 40) and low_copy(media / clip, media / low)
                     self.app.library.attach_media(mid, clip, poster if (media / poster).exists() else None,
-                                                  thumb if (media / thumb).exists() else None)
+                                                  thumb if (media / thumb).exists() else None, low if light else None, height)
                     if self.app.sync:
                         self.app.sync.poke()
             except Exception as error:

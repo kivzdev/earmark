@@ -26,7 +26,12 @@ const SESSION = () => (secure() ? '__Host-earmark' : 'earmark')
 const CHALLENGE = () => (secure() ? '__Host-earmark-challenge' : 'earmark-challenge')
 const DAY = 24 * 60 * 60 * 1000
 
-const CLIP = /^clips\/\d{4}\/\d{2}\/[a-f0-9]{12}\.mp4$/
+// a clip (720p, or its 360p copy), its poster, its thumbnail
+const CLIP = /^clips\/\d{4}\/\d{2}\/[a-f0-9]{12}(\.low)?\.mp4$/
+const PICTURE = /^(posters|thumbs)\/\d{4}\/\d{2}\/[a-f0-9]{12}\.jpg$/
+const isMedia = (path: string) => CLIP.test(path) || PICTURE.test(path)
+// the most one answer carries of a file read through this app (a Vercel function's answer stops at 4.5 MB)
+const PIECE = 2 * 1024 * 1024
 const LIBRARY = 'library.json.gz'
 const PASSKEYS = 'auth/passkeys.json'
 
@@ -200,18 +205,24 @@ app.get('/library', async c => {
 app.get('/media/*', async c => {
   if (!authed(c)) return c.json({ error: 'sign in' }, 401)
   const path = c.req.path.replace(/^\/api\/media\//, '')
-  if (!CLIP.test(path)) return c.json({ error: 'not found' }, 404)
-  const bytes = await store().read(path)
+  if (!isMedia(path)) return c.json({ error: 'not found' }, 404)
+  const s = store()
+  // a video plays straight from storage, on a link signed for a few hours: byte ranges, its CDN, no size limit
+  if (CLIP.test(path) && s.link) {
+    const url = await s.link(path).catch(error => { console.warn('signed link:', error); return null })
+    if (url) return c.body(null, 302, { Location: url, 'Cache-Control': 'private, max-age=600' })
+  }
+  const bytes = await s.read(path)
   if (!bytes) return c.json({ error: 'not found' }, 404)
   const size = bytes.length
-  const head = { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' }
+  const head = { 'Content-Type': PICTURE.test(path) ? 'image/jpeg' : 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' }
   const m = (c.req.header('Range') || '').match(/^bytes=(\d*)-(\d*)$/)
-  if (m && (m[1] || m[2])) {
-    let start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]))
-    let end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
+  if ((m && (m[1] || m[2])) || size > PIECE) {
+    let start = m?.[1] ? Number(m[1]) : m?.[2] ? Math.max(0, size - Number(m[2])) : 0
+    let end = m?.[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
     if (start > end || start >= size) return c.body(null, 416, { 'Content-Range': `bytes */${size}` })
     start = Math.max(0, start)
-    end = Math.max(start, end)
+    end = Math.min(Math.max(start, end), start + PIECE - 1) // (a player asks again for the rest)
     return c.body(bytes.slice(start, end + 1), 206, { ...head, 'Content-Range': `bytes ${start}-${end}/${size}` })
   }
   return c.body(bytes, 200, head)
@@ -289,11 +300,56 @@ app.use('/sync/*', async (c, next) => {
   await next()
 })
 
+// a file larger than a request may carry goes straight to storage, on a link signed for that one file (15 minutes)
+app.post('/sync/upload', async c => {
+  const path = c.req.query('path') || ''
+  const size = Number(c.req.query('size'))
+  if (!isMedia(path)) return c.json({ error: 'bad path' }, 400)
+  if (!Number.isInteger(size) || size < 100 || size > 64 * 1024 * 1024) return c.json({ error: 'bad size' }, 413)
+  const s = store()
+  if (!s.ticket) return c.json({ error: 'this storage takes files at PUT /api/sync/clip' }, 501)
+  try {
+    return c.json(await s.ticket(path, PICTURE.test(path) ? 'image/jpeg' : 'video/mp4', size))
+  } catch (error) {
+    console.warn('upload link:', error)
+    return c.json({ error: `storage: ${error instanceof Error ? error.message : String(error)}` }, 502)
+  }
+})
+
+// how much the storage holds at a path, read the way a player reads it (a signed link, one byte): the helper checks
+// a file it sent straight there
+app.get('/sync/check', async c => {
+  const path = c.req.query('path') || ''
+  if (!isMedia(path)) return c.json({ error: 'bad path' }, 400)
+  const s = store()
+  if (!s.link) {
+    const bytes = await s.read(path, true)
+    return c.json({ size: bytes ? bytes.length : null })
+  }
+  try {
+    const res = await fetch(await s.link(path), { headers: { Range: 'bytes=0-0' }, signal: AbortSignal.timeout(10000) })
+    await res.body?.cancel()
+    if (res.status === 404) return c.json({ size: null })
+    const total = Number((res.headers.get('content-range') || '').split('/')[1])
+    return c.json({ size: Number.isFinite(total) && total > 0 ? total : null, ranges: res.status === 206 })
+  } catch (error) {
+    return c.json({ error: `storage: ${error instanceof Error ? error.message : String(error)}` }, 502)
+  }
+})
+
 app.put('/sync/clip', async c => {
   const path = c.req.query('path') || ''
-  if (!CLIP.test(path)) return c.json({ error: 'bad path' }, 400)
+  if (!isMedia(path)) return c.json({ error: 'bad path' }, 400)
   const bytes = new Uint8Array(await c.req.arrayBuffer())
-  if (bytes.length < 100 || bytes.length > 4 * 1024 * 1024) return c.json({ error: 'bad size' }, 413)
+  // (on Vercel a request stops at 4.5 MB: bigger files come through /sync/upload; a folder takes them here)
+  const limit = store().ticket ? 4.4 * 1024 * 1024 : 64 * 1024 * 1024
+  if (bytes.length < 100 || bytes.length > limit) return c.json({ error: 'bad size' }, 413)
+  if (PICTURE.test(path)) {
+    // a JPEG starts FF D8 FF
+    if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return c.json({ error: 'not a jpeg' }, 415)
+    await store().write(path, bytes, 'image/jpeg')
+    return c.json({ ok: true })
+  }
   // an MP4 starts with a box whose type is ftyp
   if (Buffer.from(bytes.slice(4, 8)).toString() !== 'ftyp') return c.json({ error: 'not an mp4' }, 415)
   await store().write(path, bytes, 'video/mp4')
@@ -302,7 +358,7 @@ app.put('/sync/clip', async c => {
 
 app.delete('/sync/clip', async c => {
   const path = c.req.query('path') || ''
-  if (!CLIP.test(path)) return c.json({ error: 'bad path' }, 400)
+  if (!isMedia(path)) return c.json({ error: 'bad path' }, 400)
   await store().remove(path)
   return c.json({ ok: true })
 })

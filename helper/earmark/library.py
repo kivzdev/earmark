@@ -7,7 +7,6 @@ in the online copy.
 
 from __future__ import annotations
 
-import base64
 import json
 import sqlite3
 import threading
@@ -85,7 +84,12 @@ create table if not exists custom_patterns (
 
 # the first version kept one clip per caught phrase; moments replaced it
 MIGRATE = ["drop table if exists catches", "alter table channels add column avatar text",
-           "alter table sessions add column vod_marks text"]
+           "alter table sessions add column vod_marks text", "alter table moments add column cloud_bytes integer",
+           "alter table moments add column low text", "alter table moments add column clip_h integer"]
+
+# what of a moment the online copy holds, by its sync state (sync.py): 2 its clip in both sizes, 1 the 360p one,
+# 0 its picture and transcript; 0 waits to go up, 2 (an old state) and 3 were never or are no longer there
+CLOUD_LEVEL = {1: 2, 4: 1, 5: 0}
 
 
 def vod_link(vod_id: str | None, marks: list, t: float) -> str | None:
@@ -203,8 +207,10 @@ class Library:
         )
         self._touch()
 
-    def attach_media(self, mid: str, clip: str | None, poster: str | None, thumb: str | None) -> None:
-        self._run("update moments set clip = ?, poster = ?, thumb = ? where id = ?", (clip, poster, thumb, mid))
+    def attach_media(self, mid: str, clip: str | None, poster: str | None, thumb: str | None, low: str | None = None,
+                     height: int | None = None) -> None:
+        self._run("update moments set clip = ?, poster = ?, thumb = ?, low = ?, clip_h = ? where id = ?",
+                  (clip, poster, thumb, low, height, mid))
         self._touch()
 
     def rule_judged_with_clips(self) -> list[str]:
@@ -240,7 +246,7 @@ class Library:
 
     def delete_moment(self, mid: str) -> bool:
         with self._lock:
-            row = self._db.execute("select clip, poster, thumb from moments where id = ?", (mid,)).fetchone()
+            row = self._db.execute("select clip, low, poster, thumb from moments where id = ?", (mid,)).fetchone()
             if not row:
                 return False
             self._db.execute("delete from moments where id = ?", (mid,))
@@ -265,12 +271,13 @@ class Library:
         """Drop the video of moments nobody kept once they're old; their transcript stays."""
         with self._lock:
             rows = self._db.execute(
-                "select id, clip, poster, thumb from moments where picked = 0 and starred = 0 and at < ? and clip is not null",
-                (before,)).fetchall()
+                "select id, clip, low, poster, thumb from moments where picked = 0 and starred = 0 and at < ?"
+                " and clip is not null", (before,)).fetchall()
             for r in rows:
-                self._db.execute("update moments set clip = null, poster = null, thumb = null where id = ?", (r["id"],))
+                self._db.execute("update moments set clip = null, low = null, poster = null, thumb = null where id = ?",
+                                 (r["id"],))
         for r in rows:
-            for rel in (r["clip"], r["poster"], r["thumb"]):
+            for rel in (r["clip"], r["low"], r["poster"], r["thumb"]):
                 if rel:
                     (self.media / rel).unlink(missing_ok=True)
         if rows:
@@ -281,15 +288,20 @@ class Library:
     def unsynced_kept(self, limit: int) -> list[sqlite3.Row]:
         """Kept moments not uploaded yet: starred first, then newest."""
         return self._run(
-            "select id, clip from moments where (picked = 1 or starred = 1) and clip is not null and synced = 0"
+            "select id, clip, low, thumb from moments where (picked = 1 or starred = 1) and clip is not null"
+            " and synced = 0"
             " order by starred desc, at desc limit ?", (limit,)).fetchall()
 
-    def mark_synced(self, mid: str, state: int = 1) -> None:
-        self._run("update moments set synced = ? where id = ?", (state, mid))
+    def mark_synced(self, mid: str, state: int = 1, size: int | None = None) -> None:
+        if size is None:
+            self._run("update moments set synced = ? where id = ?", (state, mid))
+        else:
+            self._run("update moments set synced = ?, cloud_bytes = ? where id = ?", (state, size, mid))
 
-    def synced_oldest_first(self) -> list[sqlite3.Row]:
-        return self._run("select id, clip, starred from moments where synced = 1 and clip is not null"
-                         " order by starred, at").fetchall()
+    def in_cloud(self) -> list[sqlite3.Row]:
+        """Moments with something online: starred first, then newest first."""
+        return self._run("select id, clip, low, thumb, starred, synced from moments"
+                         " where synced in (1, 4, 5) and clip is not null order by starred desc, at desc").fetchall()
 
     def skip_stale(self, before: float) -> None:
         self._run("update moments set synced = 3 where synced = 0 and starred = 0 and at < ?", (before,))
@@ -311,7 +323,9 @@ class Library:
         return cur.rowcount > 0
 
     # the whole thing, as the dashboard reads it --------------------------------------------------------------------
-    def export(self, cloud: bool = False) -> dict:
+    def export(self, cloud: bool = False, levels: dict[str, int] | None = None) -> dict:
+        """The library as the dashboard reads it. `cloud`: as the online copy holds it, with `levels` (moment → sync
+        state) for what's about to change there."""
         with self._lock:
             channels = {r["login"]: dict(r) for r in self._db.execute("select * from channels")}
             arts = {r["name"]: r["box_art"] for r in self._db.execute("select * from categories")}
@@ -346,21 +360,17 @@ class Library:
             item = {
                 "id": m["id"], "sessionId": m["session_id"], "at": m["at"], "duration": round(m["t1"] - m["t0"], 1),
                 "title": m["title"], "score": m["score"], "picked": bool(m["picked"]), "starred": bool(m["starred"]),
-                "judged": m["judged"], "clip": m["clip"], "poster": m["poster"],
+                "judged": m["judged"], "clip": m["clip"], "low": m["low"], "clipH": m["clip_h"], "poster": m["poster"],
                 "vod": vod_link(*vods[m["session_id"]], m["t0"]),
                 "sentences": json.loads(m["sentences"]), "expressions": exprs.get(m["id"], []),
             }
-            if cloud:
-                # the copy holds only uploaded clips; small posters ride along inside the JSON (an upload each
-                # would double the uploads the free plan allows)
+            item["thumb"] = m["thumb"]
+            if cloud:  # the copy holds what's online of the moment (no posters: its player shows the clip's own frame)
+                level = CLOUD_LEVEL.get((levels or {}).get(m["id"], m["synced"]), -1)
+                item["clip"] = m["clip"] if level == 2 else None
+                item["low"] = m["low"] if level >= 1 else None
                 item["poster"] = None
-                if m["synced"] != 1:
-                    item["clip"] = None
-                thumb = self.media / m["thumb"] if m["thumb"] else None
-                item["thumb"] = ("data:image/jpeg;base64," + base64.b64encode(thumb.read_bytes()).decode()) \
-                    if thumb and thumb.is_file() else None
-            else:
-                item["thumb"] = m["thumb"]
+                item["thumb"] = m["thumb"] if level >= 0 else None
             out_moments.append(item)
         if cloud:  # streams the copy has moments from, or that were watched in the last month
             keep = {m["sessionId"] for m in out_moments}
