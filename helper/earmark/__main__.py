@@ -21,6 +21,7 @@ def _serve() -> None:
     from .app import App
     from .server import serve
 
+    sys.stdout.reconfigure(line_buffering=True)  # (so a log file shows each line as it happens)
     settings = load()
     app = App(settings)
     url = f"http://127.0.0.1:{settings.port}"

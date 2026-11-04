@@ -44,25 +44,16 @@ async function tabState() {
   })
 }
 
-function sentence(text, label) {
-  // the phrase's own words in white, the rest of the sentence grey
+function sentence(r) {
+  // the phrase's own words in white (where the helper found it), the rest of the sentence grey
   const li = document.createElement('li')
-  const sub = document.createElement('span')
-  sub.className = 'sub'
-  sub.textContent = label
-  const line = document.createElement('span')
-  line.className = 'line'
-  const words = label.replace(/[…().,]/g, ' ').split(/\s+/).filter(w => w.length > 1).map(w => w.toLowerCase().split('/')[0])
-  const re = words.length ? new RegExp(`\\b(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'gi') : null
-  let last = 0
-  if (re) {
-    for (const m of text.matchAll(re)) {
-      if (m.index > last) line.append(Object.assign(document.createElement('span'), { className: 'rest', textContent: text.slice(last, m.index) }))
-      line.append(Object.assign(document.createElement('mark'), { textContent: m[0] }))
-      last = m.index + m[0].length
-    }
-  }
-  if (last < text.length) line.append(Object.assign(document.createElement('span'), { className: re ? 'rest' : '', textContent: text.slice(last) }))
+  const sub = Object.assign(document.createElement('span'), { className: 'sub', textContent: r.pattern })
+  const line = Object.assign(document.createElement('span'), { className: 'line' })
+  const [a, b] = Array.isArray(r.match) ? r.match : [0, 0]
+  const part = (text, cls) => text && line.append(Object.assign(document.createElement(cls ? 'span' : 'mark'), { className: cls, textContent: text }))
+  part(r.sentence.slice(0, a), 'rest')
+  part(r.sentence.slice(a, b), '')
+  part(r.sentence.slice(b), 'rest')
   li.append(sub, line)
   return li
 }
@@ -121,7 +112,7 @@ async function render() {
     const key = recent.map(r => r.id).join()
     if (list.dataset.key !== key) {
       list.dataset.key = key
-      list.replaceChildren(...recent.slice(0, 3).map(r => sentence(r.sentence, r.pattern)))
+      list.replaceChildren(...recent.slice(0, 3).map(sentence))
     }
   }
 }

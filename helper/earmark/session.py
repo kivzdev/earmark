@@ -250,7 +250,7 @@ class Session:
                 "words": rel_words, "t0": round(t0, 2), "t1": round(t1, 2), "at": at,
             })
             self.caught += 1
-            self.recent.insert(0, {"id": cid, "pattern": pattern.label, "sentence": text, "at": at})
+            self.recent.insert(0, {"id": cid, "pattern": pattern.label, "sentence": text, "match": [a, b], "at": at})
         del self.recent[12:]
         if want_clip:
             self._last_clip = t0
