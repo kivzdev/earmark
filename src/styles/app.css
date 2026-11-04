@@ -2,6 +2,7 @@
    it's said, the filters, a field. Nothing new in colour or size: white and one grey, 14/20, the 4 px scale. */
 
 .rail-out { margin-top: var(--s6) }
+@media (max-width: 759px) { .rail-out { position: absolute; top: 0; right: 0; margin: 0 } }
 
 /* a section label, and anything that sits at its far end */
 .label { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4) }
