@@ -41,7 +41,12 @@
   }
 
   function adPlaying() {
-    return !!$('[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"], .video-ad-label, [data-a-target="ax-overlay"]')
+    // Twitch's own "Ad" label and countdown over the player, and only while they're shown. (Not "ax-overlay": that's
+    // the player's everyday overlay, there on every stream.)
+    for (const el of document.querySelectorAll('[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"], .video-ad-label')) {
+      if (el.offsetWidth || el.offsetHeight) return true
+    }
+    return false
   }
 
   function meta(p) {
