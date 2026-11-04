@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Earmark</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="pop">
+    <header class="head">
+      <span class="name">Earmark</span>
+      <span class="muted" id="state" data-t>…</span>
+    </header>
+
+    <section class="block" id="tab" hidden>
+      <p class="muted">This tab</p>
+      <div class="who">
+        <p id="who" data-t></p>
+        <p class="sub" id="what" data-t></p>
+      </div>
+    </section>
+
+    <section class="block" id="heard" hidden>
+      <p class="muted"><span id="count" data-t></span></p>
+      <ul class="recent" id="recent"></ul>
+    </section>
+
+    <p class="note" id="note" hidden></p>
+
+    <div class="actions">
+      <button class="btn btn-solo" id="connect" hidden>Connect to Earmark</button>
+      <button class="btn btn-solo" id="pause" hidden></button>
+      <a class="btn btn-solo" id="open" href="http://127.0.0.1:3276" target="_blank" rel="noreferrer">Open dashboard</a>
+    </div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

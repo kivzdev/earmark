@@ -1,0 +1,67 @@
+/* Earmark's own parts, on kivz.dev's system (tokens.css, site.css): the clip on a plate, the sentence lighting up as
+   it's said, the filters, a field. Nothing new in colour or size: white and one grey, 14/20, the 4 px scale. */
+
+.rail-out { margin-top: var(--s6) }
+
+/* a section label, and anything that sits at its far end */
+.label { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4) }
+
+/* rows can be buttons too (pick a clip) — the same row, the same type */
+button.row { text-align: left; font: inherit; color: inherit; background: none; border: 0; cursor: pointer }
+.items li[data-current] .row-title, .items li[data-current] .said .muted { color: var(--fg) }
+.row:focus-visible { outline: 1px solid var(--fg-2); outline-offset: 2px; border-radius: 2px }
+/* the label column holds names too (a streamer, a phrase): cut long ones */
+.y { min-width: 0; padding-right: var(--s3) }
+.y-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* a sentence in a row: the phrase white, the rest grey — dimmed rows take the phrase grey too */
+@media (hover: hover) {
+  .years:has(.items li:hover) .items li:not(:hover) .said { color: var(--fg-2) }
+}
+.said { transition: color 0.35s cubic-bezier(0.22, 1, 0.36, 1) 0.08s }
+
+/* the filters: a segmented switch (equal boxes), and the games under it as a row of their own widths */
+.filters { display: flex; flex-direction: column; gap: var(--s2); margin-left: calc(-1 * var(--ctl-x)) }
+.pills-row { flex-direction: row; flex-wrap: wrap }
+.pills-row .btn { font-size: 13px }
+.pills-x .btn[data-on], .pills-row .btn[data-on] { color: var(--fg) }
+[hidden] { display: none !important }
+
+/* ── the player: a clip on a plate (a figure's plate on kivz.dev), its sentence, its controls ── */
+.player { display: flex; flex-direction: column; gap: var(--s3) }
+.player-stage { display: flex; flex-direction: column; gap: var(--s3); will-change: filter, opacity }
+.plate {
+  position: relative; aspect-ratio: 16 / 9; overflow: hidden; isolation: isolate;
+  border-radius: var(--plate-r); background: var(--well); cursor: pointer;
+}
+.plate video { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--well) }
+/* the sentence: what has been said so far in white, what's coming in grey, the phrase underlined like a link */
+.karaoke .w { color: var(--fg-2); transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1) }
+.karaoke .w[data-on] { color: var(--fg) }
+.karaoke .w[data-phrase] { text-decoration: underline 1px var(--fg-2); text-underline-offset: 3px }
+.controls { display: flex; flex-wrap: wrap; gap: var(--s1); margin-left: calc(-1 * var(--ctl-x)) }
+.controls .btn[data-on] { background: var(--fill); color: var(--fg) }
+.controls .btn:disabled { opacity: 0.4; cursor: default }
+/* a label that changes (Play / Pause) keeps the width of its longest word, so nothing beside it moves */
+.fixed { display: inline-grid }
+.fixed::after { content: attr(data-w); visibility: hidden; height: 0 }
+
+/* ── fields ── */
+.field {
+  width: 100%; min-width: 0; height: var(--ctl); padding-inline: var(--ctl-x); border-radius: var(--ctl-r);
+  border: 0; outline: none; background: var(--fill); color: var(--fg); font: inherit;
+  box-shadow: 0 0 0 9px transparent; transition: box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.field::placeholder { color: var(--fg-2) }
+/* the focus ring closes in onto the field from a little way out, like macOS */
+.field:focus-visible { box-shadow: 0 0 0 3.5px rgb(86 86 86 / 0.5) }
+.add, .login { display: flex; flex-direction: column; gap: var(--s3) }
+.add { flex-direction: row; align-items: center }
+.add .btn, .login .controls { flex: none }
+.btn-icon { padding-inline: var(--s2) }
+.ask { display: flex; flex-direction: column; gap: var(--s2) }
+.listening { text-wrap: pretty }
+.path { overflow-wrap: anywhere }
+.kbd { padding: 1px 5px; border-radius: 4px; background: var(--well); color: var(--fg); font: 400 12.5px ui-monospace, 'SF Mono', Menlo, monospace }
+
+/* a row's far end (a date, a count) never wraps or gives way to a long title */
+.items .row > .muted:last-child { flex: none; white-space: nowrap }

@@ -1,0 +1,3 @@
+/* the ground before anything else loads, so nothing flashes white (a file, not an inline style: the pages' CSP allows
+   only the site's own styles and scripts) */
+html, body { background: #141414 }

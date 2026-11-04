@@ -1,0 +1,15 @@
+node_modules
+dist
+.vercel
+.cloud
+.DS_Store
+
+# secrets: never committed
+.env
+.env.*
+!.env.example
+
+# the helper's Python environment
+helper/.venv
+__pycache__
+*.pyc

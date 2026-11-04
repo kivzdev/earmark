@@ -1,0 +1,63 @@
+/* kivz.dev's quiet surface: one size (14/20), white and one grey, one 4 px scale, every control the same 30 px box */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+}
+:root {
+  --bg: #141414; --fg: #eaeae9; --fg-2: #565656; --hair: #1d1d1d; --fill: rgb(86 86 86 / 0.14);
+  --sans: 'Inter Variable', 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif; --lh: 20px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+  --ctl: 30px; --ctl-x: 12px; --ctl-r: 6px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+html, body { background: var(--bg); color: var(--fg) }
+body {
+  width: 320px;
+  font: 500 14px/var(--lh) var(--sans);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+p { font: inherit }
+ul { list-style: none }
+a { color: inherit; text-decoration: none }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer }
+[hidden] { display: none !important }
+.muted { color: var(--fg-2) }
+
+.pop { display: flex; flex-direction: column; gap: var(--s6); padding: var(--s5) }
+.head { display: flex; justify-content: space-between; gap: var(--s4) }
+.block { display: flex; flex-direction: column; gap: var(--s3) }
+.who { display: flex; flex-direction: column }
+.sub { font-size: 13px; line-height: 16px; color: var(--fg-2) }
+
+.recent { display: flex; flex-direction: column }
+.recent li { display: flex; flex-direction: column; gap: 2px; padding-block: var(--s2); border-top: 1px solid var(--hair) }
+.recent li:first-child { border-top: 0; padding-top: 0 }
+.recent .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.recent .line { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+.recent mark { background: none; color: var(--fg) }
+.recent .rest { color: var(--fg-2) }
+
+.note { color: var(--fg-2) }
+.note code { padding: 1px 5px; border-radius: 4px; background: #191918; color: var(--fg); font: 400 12.5px ui-monospace, 'SF Mono', Menlo, monospace }
+.note a { text-decoration: underline 1px var(--fg-2); text-underline-offset: 3px; transition: text-decoration-color 0.25s }
+.note a:hover { text-decoration-color: var(--fg) }
+
+.actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-left: calc(-1 * var(--ctl-x)) }
+.btn {
+  display: flex; align-items: center; gap: var(--s2);
+  height: var(--ctl); padding-inline: var(--ctl-x); border-radius: var(--ctl-r);
+  color: var(--fg-2); white-space: nowrap;
+  transition: color 0.25s, background-color 0.25s;
+}
+.btn-solo:hover, .btn-solo:focus-visible { background: var(--fill); color: var(--fg) }
+.btn:focus-visible { outline: 1px solid var(--fg-2); outline-offset: 2px }
+
+/* words that change blur out where they stand and the new ones blur in in the same place (no sliding) */
+.out { animation: blur-out 0.2s cubic-bezier(0.47, 0, 0.745, 0.715) both }
+.in { animation: blur-in 0.45s cubic-bezier(0.39, 0.575, 0.565, 1) both }
+@keyframes blur-out { to { opacity: 0; filter: blur(4px) } }
+@keyframes blur-in { from { opacity: 0; filter: blur(4px) } }
+@media (prefers-reduced-motion: reduce) { .out, .in { animation: none } }

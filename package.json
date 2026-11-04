@@ -1,0 +1,36 @@
+{
+  "name": "earmark",
+  "private": true,
+  "type": "module",
+  "description": "Watches Twitch with you and keeps the everyday English you hear, with the clip it was said in.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p .",
+    "helper": "cd helper && uv run earmark",
+    "deploy": "npx --yes vercel@65.10.0 pull --yes --environment=production && npx --yes vercel@65.10.0 build --prod && npx --yes vercel@65.10.0 deploy --prebuilt --prod"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@gsap/react": "^2.1.2",
+    "@phosphor-icons/react": "^2.1.10",
+    "@simplewebauthn/browser": "^13.2.2",
+    "@simplewebauthn/server": "^13.2.2",
+    "@vercel/blob": "^2.4.0",
+    "gsap": "^3.15.0",
+    "hono": "^4.13.16",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.18",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.5"
+  }
+}

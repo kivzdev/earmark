@@ -1,0 +1,72 @@
+/* Kivz design tokens (kivz.dev v3). Import before site.css. Load the font with @fontsource-variable/inter. */
+:root {
+  /* colour */
+  --bg: #141414;
+  --fg: #eaeae9;                 /* primary text, lit controls */
+  --fg-2: #565656;               /* everything secondary */
+  --hair: #1d1d1d;               /* 1 px rules between rows */
+  --fill: rgb(86 86 86 / 0.14);  /* hover / active highlight (#1d1d1d on the ground) */
+  --skel: rgb(86 86 86 / 0.28);  /* a skeleton at its fullest (#262626 on the ground)… */
+  --skel-lo: rgb(86 86 86 / 0.13); /* …and as it breathes out (#1c1c1c) */
+  --blue: #007afd;               /* doodle stars, # icon tint */
+  --green: #55ff5e;              /* doodle sparkles, ✉ icon tint */
+  --mascot: #fdd900;             /* the mascot, ★ icon tint */
+  --pink: #ff5fa8;               /* ⌂ icon tint (Home) */
+  --text: var(--fg);             /* (alias used by older pieces: selection, intro) */
+
+  /* type: one size, hierarchy by colour */
+  --sans: 'Inter Variable', 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  --lh: 20px;                    /* a line of 14 px text */
+
+  /* spacing: one 4 px scale */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px; --s15: 60px; --s20: 80px;
+
+  /* the control box: every button is this */
+  --ctl: 30px;
+  --ctl-x: 12px;
+  --ctl-r: 6px;
+  --icon: 14px;
+
+  /* lists */
+  --row: 36px;                   /* a table row, its rule included */
+  --year: 128px;                 /* the label column */
+
+  /* the frame */
+  --rail: 195px;
+  --col: 556px;
+  --edge: clamp(20px, 5.6vw, 82px);
+  --top: 40px;                   /* the logo's line */
+  --start: 120px;                /* where every column starts */
+
+  --well: #191918; /* a figure's plate in a post (ui/Preview.tsx): one quiet step up from the ground */
+  --plate-r: 12px; /*   its corner (two control corners) */
+
+  /* motion, for CSS transitions (GSAP: motion/gsap.ts registers the same curves by name) */
+  --ease-soft: cubic-bezier(.22, 1, .36, 1);
+  --ease-swift: cubic-bezier(.65, 0, .35, 1);
+  --ease-curtain: cubic-bezier(.76, 0, .24, 1);
+  --ease-settle: cubic-bezier(.05, .85, .3, 1);
+  --ease-enter: cubic-bezier(.1, .8, .3, .95);
+  --ease-travel: cubic-bezier(.45, 0, .1, 1);
+  --ease-arrive: cubic-bezier(.25, .8, .25, 1);
+  --ease-spring: linear(0, 0.137, 0.269, 0.394, 0.512, 0.617, 0.711, 0.792, 0.86, 0.916, 0.959, 0.992, 1.015, 1.029, 1.035, 1.034, 1.033, 1.031, 1.028, 1.026, 1.023, 1.02, 1.017, 1.014, 1.011, 1.008, 1.006, 1.004, 1.002, 1.001, 1, 1, 1);
+  --ease-pop: linear(0, 0.137, 0.267, 0.39, 0.504, 0.608, 0.703, 0.788, 0.863, 0.927, 0.98, 1.023, 1.056, 1.079, 1.093, 1.099, 1.097, 1.088, 1.074, 1.059, 1.046, 1.035, 1.026, 1.018, 1.013, 1.008, 1.005, 1.003, 1.002, 1.002, 1.001, 1.001, 1);
+  --ease-glide: linear(0, 0.307, 0.523, 0.681, 0.799, 0.886, 0.949, 0.993, 1.02, 1.033, 1.035, 1.033, 1.03, 1.025, 1.019, 1.013, 1.006, 1.001, 0.997, 0.995, 0.995, 0.996, 0.996, 0.997, 0.998, 0.998, 0.999, 0.999, 1, 1, 1, 1, 1);
+}
+
+/* base */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+html, body { background: var(--bg); color: var(--fg) }
+html, body { overscroll-behavior-y: none } /* no browser rubber band: the page has a short pull of its own (ui/pull.ts) */
+#root { overflow: clip }                   /* a pulled column never adds scroll height (clip, unlike hidden, keeps sticky working) */
+body {
+  font: 500 14px/var(--lh) var(--sans);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
+}
+h1, h2, h3, p { font: inherit }
+ul, ol { list-style: none }
+img, svg { display: block }
+a { color: inherit; text-decoration: none }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer }
+::selection { background: var(--fg); color: var(--bg) }
+.muted { color: var(--fg-2) }

@@ -1,0 +1,151 @@
+/* Home — design/home/new-home.svg (1470 × 836). The rail on the left (logo, the way home, the language switch, the
+   sections) and the text column centred on the page, an empty rail's width keeping it there; one spacing scale (--s*),
+   one control box (--ctl*), one highlight (--fill), all in tokens.css. Every column starts on the same line (--start):
+   the first rail control and the column's first line of text. */
+
+.site {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail) minmax(var(--s8), 1fr) minmax(0, var(--col)) minmax(var(--s8), 1fr) var(--rail);
+  min-height: 100svh;
+  padding-inline: var(--edge);
+  color: var(--fg);
+}
+.muted { color: var(--fg-2) }
+
+/* ── rails ─────────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* the controls share one width — the widest one's, the language switch's — and one left edge, so every highlight
+   (hovered, or the page you're on) is the same box (the user) */
+.rail { position: sticky; top: 0; z-index: 4; align-self: start; display: flex; flex-direction: column; width: max-content }
+.rail-l { grid-column: 1; padding-top: var(--top) }
+/* the logo is centred on the icons' column */
+.logo { width: 20px; height: 20px; margin-left: calc(var(--ctl-x) + (var(--icon) - 20px) / 2); color: var(--fg) }
+.logo svg { width: 100%; height: 100% }
+.rail-home { margin-top: calc(var(--start) - var(--top) - 20px) }
+.rail-lang { margin-top: var(--s6) } /* between the way home and the sections (the user) */
+.nav { margin-top: var(--s6) }
+
+/* every control is this box: same height, padding, corner, icon box and icon → label gap */
+.btn {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: var(--s2);
+  height: var(--ctl); padding-inline: var(--ctl-x); border-radius: var(--ctl-r);
+  color: var(--fg-2); white-space: nowrap;
+  transition: color 0.25s, background-color 0.25s;
+}
+.btn svg { flex: none; width: var(--icon); height: var(--icon); transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1) }
+.btn[data-on] { color: var(--fg) }
+.btn:focus-visible { outline: 1px solid var(--fg-2); outline-offset: 2px }
+/* a rail icon takes its colour with the highlight — under the pointer, and on the page you're on, which looks just like
+   hovering it (the user) — from the doodles' palette and one more (Shell.tsx NAV: ⌂ pink, # blue, ★ yellow, ✉ green);
+   the Home button's ↩ just turns white with its word */
+@media (hover: hover) { .btn:hover svg { color: var(--tint, currentColor) } }
+.btn[data-on] svg, .btn:focus-visible svg { color: var(--tint, currentColor) }
+/* a control on its own has the highlight built in; in a group one highlight slides between them (pill.ts) */
+.btn-solo:hover, .btn-solo:focus-visible { background: var(--fill); color: var(--fg) }
+.pills { position: relative; display: flex; flex-direction: column }
+.pill { position: absolute; top: 0; left: 0; border-radius: var(--ctl-r); background: var(--fill); pointer-events: none }
+/* the language switch: three equal boxes in a row */
+.pills-x { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(42px, 1fr); width: max-content }
+.pills-x .btn { justify-content: center; padding-inline: var(--s2); font-size: 13px }
+.rail .pills-x { width: auto } /* in the rail it takes the rail's one width, its three boxes sharing it */
+
+/* ── the top edge ──────────────────────────────────────────────────────────────────────────────────────────────── */
+/* Once the page scrolls, what passes under the browser's top edge softens and fades instead of being cut sharp (the
+   user, after benji.org: its scrim is the ground falling away over 128 px on an eased curve — 40 px on phones). Under the
+   fade, a blur that grows towards the edge: three blurs on layers of their own (a parent with opacity, a filter or a
+   mask would keep backdrop-filter from seeing the page). It comes in with the first 80 px of scroll (Shell.tsx sets
+   --scrim), so it's never over the mascot hanging at the very top; the rails sit above it (they don't scroll). */
+.scrim { position: fixed; inset: 0 0 auto; z-index: 3; height: 128px; pointer-events: none }
+.scrim > i { position: absolute; inset: 0; opacity: var(--scrim, 0) }
+.scrim > i:nth-child(1) { -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); mask-image: linear-gradient(#000 40%, transparent 85%) }
+.scrim > i:nth-child(2) { -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); mask-image: linear-gradient(#000 20%, transparent 55%) }
+.scrim > i:nth-child(3) { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); mask-image: linear-gradient(#000, transparent 30%) }
+.scrim > i:nth-child(4) {
+  /* --bg (#141414) at benji's stops */
+  background: linear-gradient(rgb(20 20 20) 0, rgb(20 20 20 / 0.737) 19%, rgb(20 20 20 / 0.54) 34%, rgb(20 20 20 / 0.38) 47%,
+    rgb(20 20 20 / 0.28) 56.5%, rgb(20 20 20 / 0.192) 65%, rgb(20 20 20 / 0.125) 73%, rgb(20 20 20 / 0.075) 80.2%,
+    rgb(20 20 20 / 0.043) 86.1%, rgb(20 20 20 / 0.02) 91%, rgb(20 20 20 / 0.008) 95.2%, rgb(20 20 20 / 0.004) 98.2%, rgb(20 20 20 / 0));
+}
+
+/* ── column ────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.col {
+  grid-column: 3; position: relative;
+  /* the first line of text sits centred on the rails' first control */
+  padding-top: calc(var(--start) + (var(--ctl) - var(--lh)) / 2);
+  padding-bottom: var(--s20);
+}
+/* a page in the column (Shell.tsx swaps them): its sections one under another, a section apart */
+.page { display: flex; flex-direction: column; gap: var(--s8) }
+.hello { position: relative; display: flex; flex-direction: column; gap: var(--s2) }
+.block { display: flex; flex-direction: column; gap: var(--s3) } /* a label over its content */
+/* the skeleton (ui/Skeleton.tsx): what's on its way, in its own shape and in the elements it will fill — a bar for a line
+   of text (centred on the line, about a capital tall), a block for an image — so nothing moves when it lands. A quick
+   answer never shows it: it waits a beat, fades in, then breathes (eased both ways), each row a little after the one
+   above it */
+.skel {
+  display: inline-block; background: var(--skel);
+  animation: skel-in 0.4s cubic-bezier(0.39, 0.575, 0.565, 1) 0.15s both,
+    skel-breathe 1.4s cubic-bezier(0.37, 0, 0.63, 1) calc(0.55s + var(--i, 0) * 0.12s) infinite alternate;
+}
+.skel-line { height: 10px; border-radius: 5px; vertical-align: middle }
+.artist .skel-line { height: 9px; border-radius: 4.5px }
+@keyframes skel-in { from { opacity: 0 } }
+@keyframes skel-breathe { to { background-color: var(--skel-lo) } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+
+.bio { position: relative; display: flex; flex-direction: column; gap: var(--s5) }
+/* a link in running text: a quiet underline that lights up under the pointer */
+.bio a, .u { text-decoration: underline 1px var(--fg-2); text-underline-offset: 3px; transition: text-decoration-color 0.25s }
+.bio a:hover, .u:hover { text-decoration-color: var(--fg) }
+
+/* a post: the same 14/20 text, paragraphs a line apart; a heading in the same voice, a quote set off by a hairline */
+.prose { display: flex; flex-direction: column; gap: var(--s5) }
+/* (the post's own children only: a figure's demo has headings and quotes of its own, styled by its kit) */
+.prose > h2 { padding-top: var(--s8); font-weight: 600; letter-spacing: -0.01em } /* set apart by weight and room (components §10) */
+.prose > blockquote { padding-left: var(--s3); border-left: 2px solid var(--hair); color: var(--fg-2) }
+.prose > :is(p, blockquote) code { padding: 1px 5px; border-radius: 4px; background: var(--well); font: 400 12.5px var(--mono) }
+
+/* releases: a year shows once; its rows are ruled across the titles only, a new year across the whole width */
+.year { display: grid; grid-template-columns: var(--year) minmax(0, 1fr); border-top: 1px solid var(--hair) } /* (0: a long title is cut with an ellipsis, never pushes the row off a phone) */
+.y, .items li { display: flex; align-items: center; height: calc(var(--row) - 1px) }
+.items li + li { height: var(--row); border-top: 1px solid var(--hair) }
+/* a row that is a link (blog posts, contact) fills its row; a date or a detail sits at the far end */
+.items .row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); width: 100%; height: 100% }
+.row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* hovering a release dims the others, so the one under the pointer stands out (design: Frame 591 → 600). Going back to
+   all-white waits a beat, so crossing the rule between two years doesn't flash everything white on the way */
+.items li { transition: color 0.35s cubic-bezier(0.22, 1, 0.36, 1) 0.08s }
+@media (hover: hover) {
+  .years:has(.items li:hover) .items li:not(:hover) { color: var(--fg-2); transition-delay: 0s }
+  .items li:hover { transition-delay: 0s }
+}
+
+/* ── narrower than the design: the empty right rail goes, the column sits beside the left one ── */
+@media (max-width: 1179px) {
+  .site { grid-template-columns: var(--rail) minmax(var(--s8), 1fr) minmax(0, var(--col)) minmax(var(--s8), 1fr) }
+}
+
+/* ── phones: the mascot stays on top, the rails become two rows under it ─────────────────────────────────────── */
+/* (a registered length, so the rows can glide up into the mascot's room when it's reeled away, and back down) */
+@property --m-top { syntax: '<length>'; inherits: true; initial-value: 0px }
+@media (max-width: 759px) {
+  .site {
+    --m-top: var(--top);
+    display: block; padding-inline: var(--s5);
+  }
+  .scrim { height: 40px }
+  /* (here the rails scroll with the page, so they pass under the top edge like the rest) */
+  .rail-l { position: absolute; top: var(--m-top); left: var(--s5); right: var(--s5); z-index: auto; width: auto; align-items: flex-start; padding: 0; gap: var(--s2) }
+  .logo { margin-block: calc((var(--ctl) - 20px) / 2) }
+  .nav { margin: 0; flex-direction: row }
+  .rail-lang { position: absolute; top: 0; right: 0; margin: 0 } /* on the logo's row, at its far end */
+  .col { padding-top: calc(var(--m-top) + 2 * var(--ctl) + var(--s2) + var(--s8) + (var(--ctl) - var(--lh)) / 2) }
+  /* the lists (posts, releases, contact) in a narrow column: the label column takes less room, and a long title wraps
+     onto a second line, the row growing with it, rather than being cut (the user); its date stays on the first line */
+  .site { --year: var(--s15) }
+  .items li, .items li + li { height: auto; min-height: var(--row) }
+  .items .row { align-items: flex-start; height: auto; padding-block: var(--s2) }
+  .row-title { overflow: visible; white-space: normal }
+  .items .row > :last-child:not(.row-title) { flex: none }
+}
