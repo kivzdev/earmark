@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import secrets
 import threading
 import time
@@ -18,6 +19,12 @@ from .media import cut
 from .patterns import Pattern, builtin, custom
 from .session import Session
 from .twitch import Twitch
+
+
+def slug_of(value) -> str | None:
+    """a Twitch category's address name, as in /directory/category/just-chatting"""
+    text = str(value or "").strip().lower()
+    return text if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", text) else None
 
 
 class Clipper:
@@ -104,13 +111,39 @@ class App:
             "kind": "vod" if meta.get("kind") == "vod" else "live",
             "vodId": str(meta.get("vodId") or "")[:20] or None,
             "vodOffset": float(meta["vodOffset"]) if isinstance(meta.get("vodOffset"), (int, float)) else None,
+            "categorySlug": slug_of(meta.get("categorySlug")),
         }
         self.library.add_session({"id": sid, "startedAt": time.time(), **clean})
         session = Session(self, sid, clean)
         with self._lock:
             self.sessions[sid] = session
-        threading.Thread(target=self.fetch_art, name="art", daemon=True).start()
+        threading.Thread(target=self.resolve, args=(session, clean), name="resolve", daemon=True).start()
         return session
+
+    def resolve(self, session: Session | None, meta: dict, sid: str | None = None) -> None:
+        """What the page said, made right with Twitch: the category's English name (the page shows it in your
+        language), and for a VOD its title and category (its page doesn't show them the way a live one does)."""
+        sid = session.id if session else sid
+        fields: dict = {}
+        if meta.get("categorySlug"):
+            cat = self.twitch.category(meta["categorySlug"])
+            if cat:
+                fields["category"] = cat["name"]
+                if cat.get("boxArt"):
+                    self.library.set_box_art(cat["name"], cat["boxArt"])
+        if meta.get("kind") == "vod" and meta.get("vodId"):
+            v = self.twitch.video(meta["vodId"])
+            if v:
+                fields.setdefault("category", v["category"])
+                fields["title"] = v["title"]
+                if v.get("displayName"):
+                    fields["displayName"] = v["displayName"]
+        fields = {k: v for k, v in fields.items() if v}
+        if fields and sid:
+            self.library.update_session(sid, **fields)
+            if session:
+                session.meta.update(fields)
+        self.fetch_art()
 
     def session(self, sid: str) -> Session | None:
         with self._lock:
@@ -147,6 +180,8 @@ class App:
         time.sleep(20)
         while True:
             try:
+                for row in self.library.vods_to_resolve():
+                    self.resolve(None, {"kind": "vod", "vodId": row["vod_id"]}, sid=row["id"])
                 self.fetch_art()
                 self.library.forget_old_media(time.time() - self.settings.keep_days * 86400)
             except Exception:

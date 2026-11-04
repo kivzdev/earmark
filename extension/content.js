@@ -49,6 +49,9 @@
     return false
   }
 
+  // what the page last showed for each stream: theatre mode and fullscreen take the title and category off the page
+  const seen = new Map()
+
   function meta(p) {
     const displayName = text('h1.tw-title') || text('h1')
     let channel = p.channel
@@ -60,15 +63,23 @@
       }
       if (!channel && /^[a-z0-9_]{2,25}$/i.test(displayName)) channel = displayName.toLowerCase()
     }
-    return {
+    const link = $('a[data-a-target="stream-game-link"]')
+    const now = {
       channel,
       displayName,
-      category: text('a[data-a-target="stream-game-link"]'),
+      // the category as the page words it (in your language) and its address name, the same in every language
+      category: link?.textContent?.trim() || '',
+      categorySlug: (link?.getAttribute('href') || '').match(/\/directory\/(?:category|game)\/([^/?#]+)/)?.[1]?.toLowerCase() || '',
       title: text('[data-a-target="stream-title"]') || text('h2[data-a-target="stream-title"]'),
       tags: [...document.querySelectorAll('a[href^="/directory/all/tags/"]')].map(a => a.textContent.trim()).filter(Boolean).slice(0, 20),
       kind: p.kind,
       vodId: p.vodId,
     }
+    const before = seen.get(p.key) || {}
+    for (const k of ['channel', 'displayName', 'category', 'categorySlug', 'title']) if (!now[k] && before[k]) now[k] = before[k]
+    if (!now.tags.length && before.tags) now.tags = before.tags
+    seen.set(p.key, now)
+    return now
   }
 
   function english(tags) {
@@ -170,16 +181,22 @@
     }
     r.recorder.onerror = () => { reason = 'recorder-error'; stop(true) }
     audio.addEventListener('ended', () => { if (rec === r) stop(true) })
+    // the recording's own clock: seconds recorded so far (ads pause it), the helper's stream time
+    r.started = performance.now()
+    r.paused = 0
+    r.pausedAt = 0
+    r.clock = () => (performance.now() - r.started - r.paused - (r.pausedAt ? performance.now() - r.pausedAt : 0)) / 1000
     if (p.kind === 'vod') {
       r.meta.vodOffset = video.currentTime
-      // a jump in the VOD starts a new recording, so clip times keep matching the VOD's
-      r.onSeek = () => { if (rec === r) stop(true) }
-      video.addEventListener('seeking', r.onSeek)
+      // a jump in the VOD carries on in the same recording; the helper notes where the player went, so its links
+      // back into the VOD keep pointing at the right second
+      r.onSeek = () => { if (rec === r && r.sid) send({ t: 'meta', sid: r.sid, meta: { vodMark: [r.clock(), video.currentTime] } }) }
+      video.addEventListener('seeked', r.onSeek)
     }
     r.recorder.start(1000)
     rec = r
     starting = Date.now()
-    lastMetaSent = JSON.stringify([r.meta.category, r.meta.title])
+    lastMetaSent = JSON.stringify([r.meta.categorySlug || r.meta.category, r.meta.title])
     send({ t: 'start', meta: r.meta })
     reason = 'listening'
   }
@@ -189,7 +206,7 @@
     if (!r) return
     rec = null
     r.alive = false
-    if (r.onSeek) r.video.removeEventListener('seeking', r.onSeek)
+    if (r.onSeek) r.video.removeEventListener('seeked', r.onSeek)
     try { if (r.recorder.state !== 'inactive') r.recorder.stop() } catch {}
     r.src.getTracks().forEach(t => t.stop())
     r.canvasTrack?.stop()
@@ -200,16 +217,22 @@
     }, 1500)
   }
 
+  let blips = 0
+  const BLIPS = new Set(['not-playing', 'offline-channel', 'loading', 'not-a-stream'])
+
   // ── the loop ────────────────────────────────────────────────────────────────────────────────────────────────
   function tick() {
     const p = page()
-    const video = p && mainVideo()
+    let video = p && mainVideo()
+    // the recording keeps its own player while that's still on the page and playing (an ad player can be bigger)
+    if (rec && p && rec.key === p.key && rec.video.isConnected && !rec.video.paused && rec.video.readyState >= 2) video = rec.video
     const m = p && meta(p)
     let why = null
     if (!settings.paired) why = 'not-paired'
     else if (settings.paused) why = 'paused'
     else if (!p) why = 'not-a-stream'
-    else if (p.kind === 'live' && !isLive()) why = 'offline-channel'
+    // (only to start: theatre mode and fullscreen take the live badge off the page while the stream plays on)
+    else if (p.kind === 'live' && !rec && !isLive()) why = 'offline-channel'
     else if (!video || video.paused) why = 'not-playing'
     else if (!m.channel) why = 'loading'
     else if (!english(m.tags)) why = 'not-english'
@@ -221,17 +244,22 @@
       stop(false)
       retryAt = Date.now() + 5000
     }
+    if (rec && why && BLIPS.has(why) && rec.key === p?.key && ++blips < 3) return
+    if (!why) blips = 0
     if (rec && (why || rec.key !== p.key || rec.video !== video)) stop(true)
     if (why) { reason = why; return }
     if (!rec && !starting) begin(p, video)
     if (!rec) return
     if (adPlaying()) {
-      if (rec.recorder.state === 'recording') rec.recorder.pause()
+      if (rec.recorder.state === 'recording') { rec.recorder.pause(); rec.pausedAt = performance.now() }
       reason = 'ad'
     } else {
-      if (rec.recorder.state === 'paused') rec.recorder.resume()
+      if (rec.recorder.state === 'paused') {
+        rec.recorder.resume()
+        if (rec.pausedAt) { rec.paused += performance.now() - rec.pausedAt; rec.pausedAt = 0 }
+      }
       reason = 'listening'
-      const now = JSON.stringify([m.category, m.title])
+      const now = JSON.stringify([m.categorySlug || m.category, m.title])
       if (rec.sid && now !== lastMetaSent) {
         lastMetaSent = now
         send({ t: 'meta', sid: rec.sid, meta: m })

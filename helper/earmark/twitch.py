@@ -16,6 +16,8 @@ GQL = "https://gql.twitch.tv/gql"
 CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"  # the twitch.tv web client's public id
 
 CATEGORY = """query($name: String!) { game(name: $name) { displayName boxArtURL(width: 285, height: 380) } }"""
+BY_SLUG = """query($slug: String!) { game(slug: $slug) { name boxArtURL(width: 285, height: 380) } }"""
+VIDEO = """query($id: ID!) { video(id: $id) { title game { name } owner { login displayName } } }"""
 CHANNELS = """query($logins: [String!]) { users(logins: $logins) {
   login displayName profileImageURL(width: 150)
   stream { title viewersCount createdAt game { displayName } }
@@ -63,6 +65,24 @@ class Twitch:
             game = (data or {}).get("game")
             return (game or {}).get("boxArtURL") or ""
         return self._cached(f"art:{category.lower()}", 7 * 86400, fetch) or None
+
+    def category(self, slug: str) -> dict | None:
+        """{name, boxArt} for a category's address name ("just-chatting"): its English name, whatever language
+        twitch.tv is shown in."""
+        def fetch():
+            game = (_ask(BY_SLUG, {"slug": slug}) or {}).get("game")
+            return {"name": game.get("name"), "boxArt": game.get("boxArtURL")} if game and game.get("name") else None
+        return self._cached(f"slug:{slug}", 7 * 86400, fetch)
+
+    def video(self, vod_id: str) -> dict | None:
+        """{title, category, login, displayName} of a past broadcast"""
+        def fetch():
+            v = (_ask(VIDEO, {"id": vod_id}) or {}).get("video")
+            if not v:
+                return None
+            return {"title": v.get("title"), "category": (v.get("game") or {}).get("name"),
+                    "login": (v.get("owner") or {}).get("login"), "displayName": (v.get("owner") or {}).get("displayName")}
+        return self._cached(f"vod:{vod_id}", 86400, fetch)
 
     def channels(self, logins: list[str]) -> dict[str, dict]:
         """login → {displayName, avatar, live: {title, viewers, since, category} | None, lastLive, lastVod}"""

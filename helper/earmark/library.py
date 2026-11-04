@@ -84,13 +84,16 @@ create table if not exists custom_patterns (
 """
 
 # the first version kept one clip per caught phrase; moments replaced it
-MIGRATE = ["drop table if exists catches", "alter table channels add column avatar text"]
+MIGRATE = ["drop table if exists catches", "alter table channels add column avatar text",
+           "alter table sessions add column vod_marks text"]
 
 
-def vod_link(vod_id: str | None, offset: float | None, t: float) -> str | None:
-    if not vod_id or offset is None:
+def vod_link(vod_id: str | None, marks: list, t: float) -> str | None:
+    """The VOD at the moment's start: from the last place the player was put before it ([stream time, VOD time])."""
+    if not vod_id or not marks:
         return None
-    s = max(0, int(offset + t - 2))
+    stream_t, vod_t = max((m for m in marks if m[0] <= t + 0.5), key=lambda m: m[0], default=marks[0])
+    s = max(0, int(vod_t + t - stream_t - 2))
     return f"https://www.twitch.tv/videos/{vod_id}?t={s // 3600}h{s // 60 % 60}m{s % 60}s"
 
 
@@ -137,7 +140,7 @@ class Library:
 
     def update_session(self, sid: str, **fields) -> None:
         cols = {"category": "category", "title": "title", "tags": "tags", "endedAt": "ended_at",
-                "heard": "heard", "words": "words", "displayName": "display_name"}
+                "heard": "heard", "words": "words", "displayName": "display_name", "channel": "channel"}
         sets, args = [], []
         for key, value in fields.items():
             if key in cols:
@@ -146,6 +149,19 @@ class Library:
         if sets:
             self._run(f"update sessions set {', '.join(sets)} where id = ?", (*args, sid))
             self._touch()
+
+    def add_vod_mark(self, sid: str, stream_t: float, vod_t: float) -> None:
+        with self._lock:
+            row = self._db.execute("select vod_marks, vod_offset from sessions where id = ?", (sid,)).fetchone()
+            if not row:
+                return
+            marks = json.loads(row["vod_marks"] or "null") or ([[0.0, row["vod_offset"]]] if row["vod_offset"] is not None else [])
+            marks.append([round(stream_t, 2), round(vod_t, 2)])
+            self._db.execute("update sessions set vod_marks = ? where id = ?", (json.dumps(marks[-500:]), sid))
+
+    def vods_to_resolve(self) -> list[sqlite3.Row]:
+        return self._run("select id, vod_id from sessions where kind = 'vod' and vod_id is not null"
+                         " and (category is null or category = '' or title is null)").fetchall()
 
     def set_channel_group(self, login: str, group: str | None) -> None:
         self._run(
@@ -190,6 +206,9 @@ class Library:
     def attach_media(self, mid: str, clip: str | None, poster: str | None, thumb: str | None) -> None:
         self._run("update moments set clip = ?, poster = ?, thumb = ? where id = ?", (clip, poster, thumb, mid))
         self._touch()
+
+    def rule_judged_with_clips(self) -> list[str]:
+        return [r[0] for r in self._run("select id from moments where judged = 2 and clip is not null order by at").fetchall()]
 
     def unjudged_moments(self) -> list[str]:
         return [r[0] for r in self._run("select id from moments where judged = 0 order by at").fetchall()]
@@ -318,7 +337,8 @@ class Library:
                 "startedAt": s["started_at"], "endedAt": s["ended_at"], "heard": round(s["heard"] or 0, 1),
                 "words": s["words"] or 0,
             }
-        vods = {s["id"]: (s["vod_id"], s["vod_offset"]) for s in sessions}
+        vods = {s["id"]: (s["vod_id"], json.loads(s.get("vod_marks") or "null")
+                           or ([[0.0, s["vod_offset"]]] if s["vod_offset"] is not None else [])) for s in sessions}
         out_moments = []
         for m in moments:
             if m["session_id"] not in out_sessions:

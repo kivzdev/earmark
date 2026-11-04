@@ -15,7 +15,7 @@ import time
 from . import patterns as P
 
 PICK_AI = 6  # a moment Claude scores this high (0-10) is kept for you
-PICK_RULES = 5
+PICK_RULES = 3  # (real talk has fewer listed phrases than you'd think)
 
 SYSTEM = """You help an intermediate English learner pick up everyday spoken English from Twitch streams.
 You get about a minute of a stream's transcript, one numbered sentence per line. The transcript comes from speech
@@ -118,6 +118,9 @@ class Judge:
     def _run(self) -> None:
         for mid in self.app.library.unjudged_moments():  # left over from before a restart
             self._q.put(mid)
+        if self.using_ai:  # a key was added: Claude looks again at what the rules judged (while the video is still there)
+            for mid in self.app.library.rule_judged_with_clips():
+                self._q.put(mid)
         while True:
             mid = self._q.get()
             try:

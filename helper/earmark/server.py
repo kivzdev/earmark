@@ -11,12 +11,13 @@ import hmac
 import json
 import mimetypes
 import re
+import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .app import App
+from .app import App, slug_of
 from .categories import GROUPS
 from .config import REPO
 from .patterns import KINDS, phrase_to_regex
@@ -209,6 +210,16 @@ class Handler(BaseHTTPRequestHandler):
             fields = {k: meta[k] for k in ("category", "title", "displayName") if isinstance(meta.get(k), str)}
             if isinstance(meta.get("tags"), list):
                 fields["tags"] = [str(t)[:40] for t in meta["tags"]][:20]
+            mark = meta.get("vodMark")
+            if isinstance(mark, list) and len(mark) == 2 and all(isinstance(x, (int, float)) for x in mark):
+                app.library.add_vod_mark(session.id, float(mark[0]), float(mark[1]))
+            slug = slug_of(meta.get("categorySlug"))
+            if slug and slug != session.meta.get("categorySlug"):
+                session.meta["categorySlug"] = slug
+                fields.pop("category", None)  # the page's own words for it; Twitch's English name comes next
+                threading.Thread(target=app.resolve, args=(session, {"categorySlug": slug}), daemon=True).start()
+            elif session.meta.get("categorySlug"):
+                fields.pop("category", None)
             app.library.update_session(session.id, **fields)
             session.meta.update(fields)
             return self._json(200, {"ok": True})
