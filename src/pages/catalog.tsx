@@ -22,7 +22,6 @@ function useLiveChannels(logins: string[]) {
 export function Home() {
   const { library, meta } = useStore()
   const v = library && view(library)
-  const live = useLiveChannels(v ? v.channels.slice(0, 12).map(c => c.login) : [])
   if (!library || !v) return <Waiting title="Earmark" />
   const today = todayKey()
   const watchedToday = sum(library.sessions.filter(s => dayKey(s.startedAt) === today).map(s => s.heard))
@@ -42,11 +41,8 @@ export function Home() {
         <p className="muted" data-in="col">Watch an English stream on Twitch and it shows up here, sorted into categories, with the moments worth keeping.</p>
       ) : (
         <>
-          <Section label="Categories" end={v.categories.length > 5 ? <span className="muted">{count(v.categories.length, 'category', 'categories')}</span> : null}>
-            <div className="covers">{v.categories.slice(0, 10).map(c => <CategoryCard key={c.name} c={c} />)}</div>
-          </Section>
-          <Section label="Channels">
-            <ul className="chans">{v.channels.slice(0, 12).map(c => <ChannelCard key={c.login} c={c} live={live[c.login]} />)}</ul>
+          <Section label="Categories" end={v.categories.length > 12 ? <span className="muted">{count(v.categories.length, 'category', 'categories')}</span> : null}>
+            <div className="covers">{v.categories.slice(0, 12).map(c => <CategoryCard key={c.name} c={c} />)}</div>
           </Section>
           <Section label="Kept for you" end={v.kept.length > 6 ? <Link className="u muted" href="/moments">All {v.kept.length}</Link> : null}>
             {v.kept.length ? (
@@ -241,8 +237,7 @@ export function Moment({ id }: { id: string }) {
         {m.session.category && <> · <Link className="u" href={`/c/${slug(m.session.category)}`}>{m.session.category}</Link></>}
         {` · ${shortDay(m.at)}, ${timeOf(m.at)}`}
       </>} />
-      <div className="moment-wrap">
-        <MomentPlayer key={m.id} m={m} start={start} />
+      <MomentPlayer key={m.id} m={m} start={start} side={
         <aside className="moment-side">
           {keys.length > 0 && (
             <Section label="Worth learning">
@@ -262,7 +257,7 @@ export function Moment({ id }: { id: string }) {
             {older && <Link className="btn btn-solo" href={`/m/${older.id}`}><span>Older</span></Link>}
           </div>
         </aside>
-      </div>
+      } />
     </div>
   )
 }

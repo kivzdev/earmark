@@ -1,0 +1,190 @@
+/* ── the player (ui/MomentPlayer.tsx, ui/PlayerControls.tsx) ──────────────────────────────────────────────────────
+   The clip on its plate with its controls over its foot. Everything moves by transform and opacity only (text never
+   snaps from pixel to pixel); over the video the ink is the page's white, and grey is white at lower opacity. */
+
+.player { position: relative; z-index: 2; container-type: inline-size }
+.player .plate { overflow: visible; cursor: auto }
+.player .plate > video { border-radius: inherit }
+.plate-still { cursor: auto }
+
+/* the click area under the controls: plays and pauses, twice for the whole screen */
+.player-hit { position: absolute; inset: 0; border-radius: inherit; cursor: pointer }
+
+/* a size change keeps the last frame here until the new size has its own */
+.player-still {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit;
+  pointer-events: none; opacity: 0; transition: opacity 0.3s var(--ease-soft);
+}
+.player-still[data-on] { opacity: 1; transition: none }
+
+/* the controls, on a scrim that eases out so it has no edge; they step aside while it plays and the pointer rests */
+.player-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  padding: 56px var(--s2) 6px; border-radius: 0 0 var(--plate-r) var(--plate-r);
+  background: linear-gradient(to top, rgb(0 0 0 / 0.62), rgb(0 0 0 / 0.5) 18%, rgb(0 0 0 / 0.34) 38%, rgb(0 0 0 / 0.18) 58%,
+    rgb(0 0 0 / 0.07) 78%, rgb(0 0 0 / 0));
+  pointer-events: none; transition: opacity 0.3s var(--ease-soft);
+}
+.player[data-idle] .player-bar { opacity: 0; transition-duration: 0.6s }
+.player[data-idle] .player-bar * { pointer-events: none !important }
+.player[data-idle] .player-hit { cursor: none }
+
+/* ── the progress bar: cut at each sentence (a mask), heard / loaded / under the pointer as scales of one track ── */
+.seek { position: relative; height: 16px; margin-inline: 6px; cursor: pointer; touch-action: none; outline: none; pointer-events: auto }
+.seek-track {
+  position: absolute; left: 0; right: 0; top: 6.5px; height: 3px; overflow: hidden; border-radius: 1.5px;
+  background: rgb(234 234 233 / 0.24); transition: transform 0.3s var(--ease-soft); will-change: transform;
+}
+.seek:is(:hover, [data-drag]) .seek-track { transform: scaleY(1.667) }
+.seek-track i { position: absolute; inset: 0; transform-origin: 0 50% }
+.seek-buf { background: rgb(234 234 233 / 0.2); transform: scaleX(var(--b)) }
+.seek-hover { background: rgb(234 234 233 / 0.24); transform: scaleX(var(--h)); opacity: 0; transition: opacity 0.2s }
+.seek:hover .seek-hover { opacity: 1 }
+.seek-fill { background: var(--fg); transform: scaleX(var(--p)) }
+.seek-head { position: absolute; inset: 0; pointer-events: none; transform: translateX(calc(var(--p) * 100%)); will-change: transform }
+.seek-knob {
+  position: absolute; left: -6px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--fg);
+  transform: scale(0); transition: transform 0.25s var(--ease-soft);
+}
+.seek:is(:hover, :focus-visible, [data-drag]) .seek-knob { transform: none; transition: transform 0.4s var(--ease-spring) }
+/* over the pointer: the sentence said there and its time */
+.seek-tip {
+  position: absolute; left: 0; bottom: calc(100% + var(--s2)); display: flex; flex-direction: column; align-items: center; gap: 2px;
+  width: max-content; max-width: min(280px, 100%); padding: 6px 10px; border-radius: var(--ctl-r);
+  background: rgb(12 12 12 / 0.86); color: var(--fg); font-size: 13px; line-height: 18px; text-align: center;
+  pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  transform: translateX(clamp(0px, calc(var(--x, 0px) - 50%), calc(var(--w, 0px) - 100%)));
+}
+.seek-tip[data-show] { opacity: 1 }
+.seek-said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-wrap: balance }
+.seek-at { color: rgb(234 234 233 / 0.6); font-variant-numeric: tabular-nums }
+
+/* ── the row of controls ── */
+.player-row { display: flex; align-items: center; gap: 2px; margin-top: 2px }
+.player-row > * { pointer-events: auto }
+.player-gap { flex: 1 }
+.pbtn {
+  position: relative; display: inline-grid; place-items: center; min-width: var(--ctl); height: var(--ctl); padding: 0 6px;
+  border: 0; border-radius: var(--ctl-r); background: none; color: var(--fg); font: inherit; cursor: pointer;
+  transition: background-color 0.2s;
+}
+.pbtn svg { width: 16px; height: 16px }
+@media (hover: hover) { .pbtn:hover { background: rgb(234 234 233 / 0.12) } }
+.pbtn:focus-visible { outline: 1px solid rgb(234 234 233 / 0.6); outline-offset: -1px }
+/* captions on: a short line under the icon */
+.pbtn::after {
+  content: ''; position: absolute; left: 50%; bottom: 4px; width: 14px; height: 2px; margin-left: -7px; border-radius: 1px;
+  background: var(--fg); transform: scaleX(0); transition: transform 0.3s var(--ease-soft);
+}
+.pbtn[aria-pressed='true']::after { transform: none }
+.player-rate { min-width: 34px; font-size: 13px; font-variant-numeric: tabular-nums; text-align: center }
+.player-time {
+  padding-inline: var(--s2); color: var(--fg); font-size: 13px; line-height: 16px; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none !important;
+  transform: translateX(-60px); transition: transform 0.35s var(--ease-soft); will-change: transform;
+}
+.player-time span { color: rgb(234 234 233 / 0.6) }
+
+/* volume: the slider slides out of the speaker (a clip), and the time steps aside for it */
+.vol { display: flex; align-items: center }
+.vol-slider {
+  position: relative; width: 60px; height: var(--ctl); cursor: pointer; touch-action: none; outline: none;
+  clip-path: inset(0 100% 0 0); transition: clip-path 0.35s var(--ease-soft);
+}
+.vol:is(:hover, :focus-within, [data-drag]) .vol-slider { clip-path: inset(0) }
+.vol:is(:hover, :focus-within, [data-drag]) + .player-time { transform: none }
+.vol-rail { position: absolute; inset: 0 6px }
+.vol-track { position: absolute; left: 0; right: 0; top: 13.5px; height: 3px; overflow: hidden; border-radius: 1.5px; background: rgb(234 234 233 / 0.28) }
+.vol-fill { position: absolute; inset: 0; background: var(--fg); transform-origin: 0 50%; transform: scaleX(var(--v)) }
+.vol-head { position: absolute; inset: 0; pointer-events: none; transform: translateX(calc(var(--v) * 100%)) }
+.vol-knob { position: absolute; left: -6px; top: 9px; width: 12px; height: 12px; border-radius: 50%; background: var(--fg) }
+.vol-slider:focus-visible .vol-knob { box-shadow: 0 0 0 3px rgb(234 234 233 / 0.3) }
+@media (hover: none) {
+  .vol-slider { display: none }
+  .player-time { transform: none }
+}
+
+/* ── a list over a control (speed, quality): out of its corner on a snappy spring, rows a beat apart ── */
+.pmenu-wrap { position: relative }
+.pmenu {
+  position: absolute; right: -4px; bottom: calc(100% + var(--s2)); z-index: 5; min-width: 132px; padding: var(--s1);
+  border-radius: 10px; background: rgb(24 24 23 / 0.94); outline: 1px solid rgb(234 234 233 / 0.06); outline-offset: -1px;
+  -webkit-backdrop-filter: blur(20px) saturate(1.2); backdrop-filter: blur(20px) saturate(1.2);
+  transform-origin: 100% 100%; transform: scale(0.94); opacity: 0; visibility: hidden;
+  transition: transform 0.14s ease-in, opacity 0.14s ease-in, visibility 0s 0.14s;
+}
+.pmenu[data-open] {
+  transform: none; opacity: 1; visibility: visible;
+  transition: transform 0.36s var(--ease-snappy), opacity 0.16s var(--ease-soft), visibility 0s;
+}
+.pmenu-label { margin: 0; padding: var(--s1) var(--s3) 6px; color: rgb(234 234 233 / 0.5); font-size: 13px; line-height: 16px }
+.pmenu .btn {
+  justify-content: space-between; width: 100%; border: 0; background: none; color: rgb(234 234 233 / 0.62);
+  font: inherit; font-variant-numeric: tabular-nums; cursor: pointer;
+  opacity: 0; transform: translateY(4px); transition: color 0.25s, opacity 0.12s, transform 0s 0.14s;
+}
+.pmenu[data-open] .btn {
+  opacity: 1; transform: none;
+  transition: color 0.25s, opacity 0.25s var(--ease-soft) calc(var(--i) * 30ms + 40ms),
+    transform 0.36s var(--ease-snappy) calc(var(--i) * 30ms + 40ms);
+}
+.pmenu .btn[data-on] { color: var(--fg) }
+.pmenu .pill { background: rgb(234 234 233 / 0.1) }
+.pmenu-note { color: rgb(234 234 233 / 0.45) }
+
+/* ── over the picture: captions, the play/pause flash, the first play, waiting ── */
+.player-cue {
+  position: absolute; left: 50%; bottom: 64px; z-index: 1; width: max-content; max-width: min(86%, 640px); margin: 0;
+  padding: 3px 10px; border-radius: var(--ctl-r); background: rgb(10 10 10 / 0.74); color: var(--fg);
+  font-size: 16px; line-height: 24px; text-align: center; text-wrap: balance; pointer-events: none;
+  transform: translateX(-50%); transition: transform 0.4s var(--ease-soft); will-change: transform;
+}
+.player[data-idle] .player-cue { transform: translate(-50%, 46px) }
+.player-cue .w { color: rgb(234 234 233 / 0.5); transition: color 0.2s var(--ease-soft) }
+.player-cue .w[data-said] { color: var(--fg) }
+.player-cue .w[data-x] { text-decoration: underline 1px rgb(234 234 233 / 0.5); text-underline-offset: 3px }
+
+.player-flash {
+  position: absolute; left: 50%; top: 50%; z-index: 1; display: grid; place-items: center; width: 60px; height: 60px;
+  margin: -30px 0 0 -30px; border-radius: 50%; background: rgb(10 10 10 / 0.5); color: var(--fg); pointer-events: none;
+  animation: player-flash 0.7s var(--ease-soft) both;
+}
+.player-flash svg { width: 24px; height: 24px }
+.player-start { animation: none }
+@keyframes player-flash {
+  from { opacity: 0; transform: scale(0.7) }
+  18% { opacity: 1; transform: none }
+  to { opacity: 0; transform: scale(1.18) }
+}
+
+.player-wait {
+  position: absolute; left: 50%; top: 50%; z-index: 1; display: flex; gap: 6px; pointer-events: none;
+  transform: translate(-50%, -50%); animation: player-in 0.3s 0.4s var(--ease-soft) both;
+}
+.player-wait i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg); animation: player-breath 0.9s ease-in-out infinite alternate }
+.player-wait i:nth-child(2) { animation-delay: 0.15s }
+.player-wait i:nth-child(3) { animation-delay: 0.3s }
+@keyframes player-in { from { opacity: 0 } }
+@keyframes player-breath {
+  from { opacity: 0.25; transform: scale(0.75) }
+  to { opacity: 1; transform: none }
+}
+
+/* ── the whole screen: the picture fits, the controls and captions grow a little ── */
+.player:fullscreen { display: grid; background: #000 }
+.player:fullscreen .plate { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; background: #000 }
+.player:fullscreen .plate > video, .player:fullscreen .player-still { object-fit: contain; background: #000 }
+.player:fullscreen .player-bar { padding: 96px var(--s4) var(--s3) }
+.player:fullscreen .player-cue { bottom: 96px; padding: 0.15em 0.55em; font-size: clamp(18px, 2vw, 30px); line-height: 1.45 }
+.player:fullscreen[data-idle] .player-cue { transform: translate(-50%, 64px) }
+
+/* a small player keeps what matters */
+@container (max-width: 520px) {
+  .pbtn[aria-label='Picture in picture'] { display: none }
+  .player-time span { display: none }
+  .player-cue { bottom: 58px; font-size: 14px; line-height: 20px }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player, .player * { transition-duration: 0s !important; animation-duration: 0s !important }
+}

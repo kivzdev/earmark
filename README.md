@@ -15,12 +15,14 @@ Chrome extension ──► the Earmark helper on your computer ──► your da
 
 ## What it does
 
-- **Listens with you.** While a Twitch stream or VOD plays, the extension hands a small 360p copy of what the player
-  shows and says to the helper. It pauses during ads and skips streams tagged with another language.
+- **Listens with you.** While a Twitch stream or VOD plays, the extension hands a 720p copy of what the player shows
+  and says to the helper. It pauses during ads and skips streams tagged with another language.
 - **Writes down everything said**, on your computer: NVIDIA's Parakeet on Apple Silicon, Whisper elsewhere.
-- **Cuts it into moments**: about a minute each, at sentence ends, with the video and the transcript word by word.
-  In the player the words light up as they're spoken; click a sentence to hear it again and again; slow it to
-  0.75× or 0.5× for the quick, swallowed bits.
+- **Cuts it into moments**: about a minute each, at sentence ends, with the video (720p, and a 360p copy) and the
+  transcript word by word. Earmark's own player: a progress bar cut at each sentence (hover it to read the sentence
+  said there), volume, speed from 0.5× to 1.5× for the quick, swallowed bits, captions on the video, 720p / 360p / Auto
+  (Auto drops to 360p on a slow connection), picture in picture and full screen. The words light up as they're spoken;
+  click a sentence to hear it again and again. Keys: space or K, ← → a sentence, J L five seconds, M, C, F, < >.
 - **Keeps the good ones for you.** With an Anthropic API key, Claude Haiku 5.5 reads each minute and scores how much
   everyday spoken English is in it, gives it a title and picks out the expressions worth learning, with a short note
   each. Without a key, a built-in list of 110+ everyday phrases does the same job by rules.
@@ -112,10 +114,13 @@ only what your helper uploads and opens only with your passkey (Face ID, Touch I
 3. Open the site, type the setup code, and make a passkey. The code only works while the site has no passkey; if you
    ever lose them all, delete `auth/passkeys.json` from the Blob store and set up again.
 
-Only the kept moments go up. Vercel's free plan gives Blob storage 1 GB and 2,000 uploads a month, so the helper uploads
-at most 25 clips a day (starred and newest first) and keeps the copy under 900 MB by removing the oldest clips that
-aren't starred; their small pictures ride along inside the library. Your computer keeps every moment, and the video of
-moments nobody kept for 14 days (`EARMARK_KEEP_DAYS`). Limits are in `.env.example`.
+Only the kept moments go up: the clip in both sizes and its thumbnail, starred and newest first. Vercel's free plan
+gives Blob storage 1 GB, 2,000 uploads and 10 GB of downloads a month, and going over locks the storage for 30 days, so
+the helper counts every file and every snapshot of the library against 50 uploads a day (`EARMARK_SYNC_UPLOADS_PER_DAY`:
+at most 1,550 in any month; what doesn't fit waits for the next day) and keeps the copy under 900 MB: the newest moments
+in both sizes, older ones at 360p, the oldest as a thumbnail and transcript. Videos play straight from storage on links
+signed for a few hours; a minute at 720p is about 7 MB to watch. Your computer keeps every moment, and the video of
+moments nobody kept for 7 days (`EARMARK_KEEP_DAYS`). Limits are in `.env.example`.
 
 ## Development
 

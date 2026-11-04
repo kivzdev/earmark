@@ -2,13 +2,42 @@
    video stills — but the surface stays kivz.dev's: the pictures carry the colour, the words stay 14/20 white and one grey,
    gaps come from the 4 px scale, and hovering one thing in a row dims the rest (like the ruled tables). */
 
-.rail-out { margin-top: var(--s6) }
-@media (max-width: 759px) { .rail-out { position: absolute; top: 0; right: 0; margin: 0 } }
-
-/* the catalog's pages open past the text column, so five covers fit in a row */
-@media (min-width: 760px) {
-  .col:has(> .page.wide) { grid-column: 2 / -1; padding-left: var(--s8); max-width: calc(1112px + var(--s8)) }
+/* the rail sits a few rem further left than kivz.dev's and is that much wider, for long channel names; the column
+   stays where it was (the left margin and rail add up to the right rail and margin) */
+.site {
+  --edge-l: clamp(16px, 2.2vw, 32px);
+  padding-left: var(--edge-l);
+  grid-template-columns: calc(var(--rail) + var(--edge) - var(--edge-l)) minmax(var(--s8), 1fr) minmax(0, var(--col)) minmax(var(--s8), 1fr) var(--rail);
 }
+@media (max-width: 1179px) {
+  .site { grid-template-columns: calc(var(--rail) + var(--edge) - var(--edge-l)) minmax(var(--s8), 1fr) minmax(0, var(--col)) minmax(var(--s8), 1fr) }
+}
+.rail-l { width: auto; padding-right: var(--s6) }
+/* the first group in the rail starts on the start line, the next one a little under it */
+.logo + .pills { margin-top: calc(var(--start) - var(--top) - 20px) }
+.chan-list + .nav { margin-top: var(--s6) }
+
+/* the channels: rows set like the sections, a round picture in the icon's place, a red dot when live; twelve rows
+   show, the rest scroll inside */
+.chan-list { max-height: calc(12 * var(--ctl)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none }
+.chan-list::-webkit-scrollbar { display: none }
+.chan-btn[data-live] { color: var(--fg) }
+.chan-btn .ava { flex: none; width: 18px; height: 18px; margin-inline: -2px; overflow: hidden; border-radius: 50%; background: var(--well) }
+.chan-btn .ava img { display: block; width: 100%; height: 100%; object-fit: cover }
+.chan-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.chan-btn .dot { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: #eb0400 }
+
+.rail-out { margin-top: var(--s6) }
+@media (max-width: 759px) {
+  .rail-out { position: absolute; top: 0; right: 0; margin: 0 }
+  .site { padding-left: var(--s5) }
+  .chan-list { display: none }
+  .logo + .pills { margin-top: 0 }
+}
+
+/* the catalog's pages keep kivz.dev's centred column, a few rem wider on each side (556 + 2 × 6rem): six covers, three
+   videos to a row */
+.site:has(.page.wide) { --col: calc(556px + 2 * 6rem) }
 .page.wide { gap: var(--s10) }
 
 /* a section label, and anything that sits at its far end */
@@ -33,17 +62,17 @@ button.row { text-align: left; font: inherit; color: inherit; background: none; 
   .mgrid:has(.mcard:hover) .mcard:not(:hover) { opacity: 0.45; transition-delay: 0s }
 }
 
-/* ── categories: Twitch's box art, five to a row ── */
-.covers { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s6) var(--s4) }
+/* ── categories: Twitch's box art, six to a row ── */
+.covers { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s5) var(--s3) }
 .cover { display: flex; flex-direction: column; gap: var(--s2); min-width: 0 }
 .art { display: block; aspect-ratio: 3 / 4; overflow: hidden; border-radius: var(--ctl-r); background: var(--well) }
 .art img { display: block; width: 100%; height: 100%; object-fit: cover }
 .art-none { display: flex; align-items: flex-end; height: 100%; padding: var(--s3); color: var(--fg-2) }
 .cover-text { display: flex; flex-direction: column; min-width: 0 }
-.cover-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cover-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
 
 /* ── channels: round pictures, live dot, when they last streamed ── */
-.chans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3) var(--s6) }
+.chans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3) var(--s8) }
 .chan { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0 }
 .chan-main { display: flex; align-items: center; gap: var(--s3); min-width: 0 }
 .chan-text { display: flex; flex-direction: column; min-width: 0 }
@@ -60,7 +89,7 @@ button.row { text-align: left; font: inherit; color: inherit; background: none; 
 .avatar.big { width: 64px; height: 64px }
 
 /* ── moments: a still, its length, its title, who said it, the expressions in it ── */
-.mgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s8) var(--s4) }
+.mgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s6) var(--s3) }
 .mcard { display: flex; flex-direction: column; gap: var(--s1); min-width: 0 }
 .thumb { position: relative; display: block; aspect-ratio: 16 / 9; margin-bottom: var(--s1); overflow: hidden; border-radius: var(--ctl-r); background: var(--well) }
 .thumb img { display: block; width: 100%; height: 100%; object-fit: cover }
@@ -88,9 +117,9 @@ button.row { text-align: left; font: inherit; color: inherit; background: none; 
 .pills-x .btn[data-on], .pills-row .btn[data-on] { color: var(--fg) }
 [hidden] { display: none !important }
 
-/* ── a moment: the clip on a plate, the transcript under it, what's worth learning beside it ── */
-.moment-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--s10); align-items: start }
+/* ── a moment: the clip on a plate across the column, the transcript under it, what's worth learning beside that ── */
 .moment { display: flex; flex-direction: column; gap: var(--s4); min-width: 0 }
+.moment-body { display: grid; grid-template-columns: minmax(0, 1fr) 208px; gap: var(--s8); align-items: start; margin-top: var(--s2) }
 .plate { position: relative; aspect-ratio: 16 / 9; overflow: hidden; isolation: isolate; border-radius: var(--plate-r); background: var(--well); cursor: pointer }
 .plate video, .plate img { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--well) }
 .plate-note { position: absolute; inset: auto 0 0; padding: var(--s3) var(--s4); background: linear-gradient(transparent, rgb(20 20 20 / 0.85)); color: var(--fg-2) }
@@ -109,7 +138,7 @@ button.row { text-align: left; font: inherit; color: inherit; background: none; 
 .line .w { color: var(--fg-2); transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1) }
 .line .w[data-said] { color: var(--fg) }
 .line .w[data-x] { text-decoration: underline 1px var(--fg-2); text-underline-offset: 3px }
-.moment-side { position: sticky; top: var(--s10); display: flex; flex-direction: column; gap: var(--s6) }
+.moment-side { position: sticky; top: var(--s10); display: flex; flex-direction: column; gap: var(--s6); min-width: 0 }
 .said-list { display: flex; flex-direction: column; gap: var(--s4) }
 .said-list li { display: flex; flex-direction: column }
 .said-key { text-decoration: underline 1px transparent; text-underline-offset: 3px; transition: text-decoration-color 0.25s }
@@ -133,15 +162,15 @@ button.row { text-align: left; font: inherit; color: inherit; background: none; 
 .kbd { padding: 1px 5px; border-radius: 4px; background: var(--well); color: var(--fg); font: 400 12.5px ui-monospace, 'SF Mono', Menlo, monospace }
 
 /* ── narrower ── */
-@media (max-width: 1179px) {
+@media (max-width: 999px) {
   .covers { grid-template-columns: repeat(4, minmax(0, 1fr)) }
-  .chans, .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)) }
-  .moment-wrap { grid-template-columns: minmax(0, 1fr) }
-  .moment-side { position: static }
+  .chans { grid-template-columns: minmax(0, 1fr) }
 }
 @media (max-width: 759px) {
-  .covers { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s5) var(--s3) }
-  .chans, .mgrid { grid-template-columns: minmax(0, 1fr) }
+  .covers { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+  .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .moment-body { grid-template-columns: minmax(0, 1fr) }
+  .moment-side { position: static }
   .bar { flex-direction: column }
   .chan-head { flex-wrap: wrap }
 }

@@ -7,6 +7,7 @@ import { signOut } from '@/auth'
 import { start, useStore } from '@/data'
 import { HomeIcon, Mark, MomentsIcon, PhrasesIcon, SettingsIcon, SignOutIcon } from '@/ui/icons'
 import { usePill } from '@/ui/pill'
+import { ChannelRail } from '@/ui/ChannelRail'
 import { Login } from '@/pages/Login'
 import { Category, Channel, Expression, Expressions, Home, Missing, Moment, Moments } from '@/pages/catalog'
 import { Settings } from '@/pages/Settings'
@@ -138,6 +139,7 @@ export function Shell() {
         <div className="scrim" ref={scrim} aria-hidden><i /><i /><i /><i /></div>
         <aside className="rail rail-l">
           <Link className="logo" href="/" aria-label="Earmark" data-in="rail"><Mark /></Link>
+          {!locked && <ChannelRail />}
           <nav className="pills nav" ref={nav} aria-label="Main" hidden={locked}>
             <span className="pill" aria-hidden />
             {items.map(({ id, href, label, Icon, tint: c }) => (

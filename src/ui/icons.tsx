@@ -2,6 +2,10 @@
 // else in Kivz's projects comes from Phosphor until their own set is drawn), plus Earmark's mark.
 export {
   ArrowBendUpLeft as BackIcon,
+  ArrowCounterClockwise as ReplayIcon,
+  ClosedCaptioning as CaptionsIcon,
+  CornersIn as SmallIcon,
+  CornersOut as FullIcon,
   ArrowRight as NextIcon,
   ArrowSquareOut as OutIcon,
   ChatCircleText as PhrasesIcon,
@@ -10,10 +14,14 @@ export {
   GearSix as SettingsIcon,
   House as HomeIcon,
   Pause as PauseIcon,
+  PictureInPicture as PipIcon,
   Play as PlayIcon,
   Plus as PlusIcon,
   Repeat as LoopIcon,
   SignOut as SignOutIcon,
+  SpeakerHigh as VolumeIcon,
+  SpeakerLow as VolumeLowIcon,
+  SpeakerX as MutedIcon,
   Star as StarIcon,
   X as RemoveIcon,
 } from '@phosphor-icons/react'

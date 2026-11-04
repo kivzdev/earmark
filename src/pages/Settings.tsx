@@ -80,7 +80,7 @@ export function Settings() {
         {meta.sync ? (
           <Table>
             <Rows label="Address"><li><span className="row"><span className="row-title">{meta.sync.url}</span></span></li></Rows>
-            <Rows label="Today"><li><span className="row"><span>{meta.sync.uploadedToday} of {meta.sync.perDay} clips uploaded</span></span></li></Rows>
+            <Rows label="Today"><li><span className="row"><span>{meta.sync.uploadedToday} of {meta.sync.perDay} uploads</span></span></li></Rows>
             <Rows label="Last copy">
               <li><span className="row"><span>{meta.sync.lastOk ? timeOf(meta.sync.lastOk) : 'Not yet'}</span><span className="muted">{meta.sync.error ?? ''}</span></span></li>
             </Rows>

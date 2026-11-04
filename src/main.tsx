@@ -3,6 +3,7 @@ import '@fontsource-variable/inter'
 import './styles/tokens.css'
 import './styles/site.css'
 import './styles/app.css'
+import './styles/player.css'
 import { Shell } from './Shell'
 
 // No StrictMode: its double-mounted effects would build GSAP timelines twice.

@@ -16,7 +16,9 @@ export type Sentence = { t0: number; t1: number; text: string; words: Word[] }
 export type Expression = { key: string; text: string; note: string; s: number; a: number; b: number }
 export type Moment = {
   id: string; sessionId: string; at: number; duration: number; title: string | null; score: number | null
-  picked: boolean; starred: boolean; judged: number; clip: string | null; poster: string | null; thumb: string | null
+  picked: boolean; starred: boolean; judged: number
+  // the clip (720p, or what the stream was below that; clipH says), its 360p copy, a full-size and a small picture
+  clip: string | null; low: string | null; clipH: number | null; poster: string | null; thumb: string | null
   vod: string | null; sentences: Sentence[]; expressions: Expression[]
 }
 export type Channel = { login: string; displayName: string; group: Group | null; avatar: string | null }
