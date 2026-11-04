@@ -12,7 +12,8 @@
   },
   "background": { "service_worker": "background.js" },
   "content_scripts": [
-    { "matches": ["https://www.twitch.tv/*"], "js": ["content.js"], "run_at": "document_idle" }
+    { "matches": ["https://www.twitch.tv/*"], "js": ["content.js"], "run_at": "document_idle" },
+    { "matches": ["http://127.0.0.1:3276/*", "http://localhost:3276/*"], "js": ["dashboard.js"], "run_at": "document_start" }
   ],
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1:3276/*"],

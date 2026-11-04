@@ -155,8 +155,10 @@ class Handler(BaseHTTPRequestHandler):
         app = self.app
         m = re.fullmatch(r"/v1/pair(?:/([\w-]{6,20}))?", path)
         if m:
+            # a web page can't ask (Chrome leaves the Origin off some extension requests, so none is fine too); what
+            # actually guards pairing is that you allow it on the dashboard
             origin = self.headers.get("Origin", "")
-            if not origin.startswith("chrome-extension://"):
+            if origin and not origin.startswith("chrome-extension://"):
                 return self._error(403, "pairing is for the Earmark extension")
             if method == "POST" and not m[1]:
                 try:

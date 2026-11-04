@@ -14,7 +14,9 @@ export function Settings() {
   const engine = meta.engine
   const custom = library.patterns.filter(p => p.custom)
 
-  const answer = (id: string, allow: boolean) => write('POST', `/api/pairing/${id}`, { allow }).catch(e => setError(e.message))
+  const answer = (id: string, allow: boolean) => write('POST', `/api/pairing/${id}`, { allow })
+    .then(() => { if (allow) window.postMessage({ source: 'earmark-dashboard', type: 'paired' }, location.origin) })
+    .catch(e => setError(e.message))
   const add = async (e: FormEvent) => {
     e.preventDefault()
     if (!phrase.trim()) return

@@ -86,15 +86,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
   for (const p of ports) { try { p.postMessage(settingsMessage()) } catch {} }
 })
 
-// ── the popup ──────────────────────────────────────────────────────────────────────────────────────────────
+// ── the popup, and the dashboard's Allow ─────────────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
-  if (sender.id !== chrome.runtime.id || sender.tab) return
+  if (sender.id !== chrome.runtime.id) return
+  // the dashboard page (dashboard.js) says you allowed the extension: collect the token now
+  if (sender.tab) {
+    if (m.t === 'paired' && /^http:\/\/(127\.0\.0\.1|localhost):3276\//.test(sender.url || '')) collect()
+    return
+  }
   ;(async () => {
     await loaded
     if (m.t === 'status') {
+      await collect()
       try {
         const { status, data } = await api('/v1/status')
-        reply({ helper: true, paired: status === 200, status: status === 200 ? data : null, paused: settings.paused })
+        reply({ helper: true, paired: status === 200, status: status === 200 ? data : null, paused: settings.paused, waiting: !!(await pending()) })
       } catch {
         reply({ helper: false, paired: !!settings.token, paused: settings.paused })
       }
@@ -108,31 +114,47 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   return true
 })
 
-let pairing = null
-async function pair() {
-  if (pairing) return { ok: true, waiting: true }
-  let id
+// Pairing: the helper makes a request, you allow it on the dashboard, the helper hands the token over once. The request
+// is kept in storage, so it's picked up even if Chrome put this worker to sleep meanwhile: when it wakes, whenever the
+// popup asks, and the moment the dashboard says you allowed it.
+async function pending() {
+  const { pairing } = await chrome.storage.local.get('pairing')
+  return pairing && pairing.until > Date.now() ? pairing : null
+}
+
+async function collect() {
+  const p = await pending()
+  if (!p) return
   try {
-    const { status, data } = await api('/v1/pair', { method: 'POST', json: {} })
-    if (status !== 200) return { ok: false, error: data?.error || `helper answered ${status}` }
-    id = data.id
-  } catch {
-    return { ok: false, error: 'offline' }
-  }
-  pairing = id
-  await chrome.tabs.create({ url: `${HELPER}/settings?pair=${encodeURIComponent(id)}` })
-  const until = Date.now() + 3 * 60 * 1000
-  ;(async () => {
-    while (Date.now() < until) {
-      await new Promise(r => setTimeout(r, 1500))
-      await chrome.storage.local.get('token') // (an extension call keeps this worker awake while it waits)
-      try {
-        const { data } = await api(`/v1/pair/${encodeURIComponent(id)}`)
-        if (data?.state === 'allowed' && data.token) { await chrome.storage.local.set({ token: data.token }); break }
-        if (data?.state === 'denied' || data?.state === 'gone') break
-      } catch {}
+    const { data } = await api(`/v1/pair/${encodeURIComponent(p.id)}`)
+    if (data?.state === 'allowed' && data.token) await chrome.storage.local.set({ token: data.token, pairing: null })
+    else if (data?.state === 'denied' || data?.state === 'gone') await chrome.storage.local.remove('pairing')
+  } catch { /* the helper isn't answering right now: try again later */ }
+}
+
+async function pair() {
+  const waiting = await pending()
+  let id = waiting?.id
+  if (!id) {
+    try {
+      const { status, data } = await api('/v1/pair', { method: 'POST', json: {} })
+      if (status !== 200) return { ok: false, error: data?.error || `helper answered ${status}` }
+      id = data.id
+    } catch {
+      return { ok: false, error: 'offline' }
     }
-    pairing = null
+    await chrome.storage.local.set({ pairing: { id, until: Date.now() + 9 * 60 * 1000 } })
+  }
+  await chrome.tabs.create({ url: `${HELPER}/settings?pair=${encodeURIComponent(id)}` })
+  // keep asking while this worker is awake (an extension call each round keeps it from sleeping mid-wait)
+  ;(async () => {
+    for (let i = 0; i < 120 && (await pending()); i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      await collect()
+    }
   })()
   return { ok: true, waiting: true }
 }
+
+// woken up with a pairing still open: see whether it was allowed while asleep
+loaded.then(collect)

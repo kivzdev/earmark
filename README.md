@@ -89,7 +89,8 @@ only what your helper uploads and opens only with your passkey (Face ID, Touch I
    `EARMARK_SYNC_TOKEN` in the project's environment variables.
 2. On your computer, put the address and the same token in `.env` as `EARMARK_SYNC_URL` and `EARMARK_SYNC_TOKEN`, and
    restart the helper.
-3. Open the site, type the setup code, and make a passkey.
+3. Open the site, type the setup code, and make a passkey. The code only works while the site has no passkey; if you
+   ever lose them all, delete `auth/passkeys.json` from the Blob store and set up again.
 
 Vercel's free plan gives Blob storage 1 GB and 2,000 uploads a month, so the helper uploads at most 40 clips a day
 (starred and newest first) and keeps the copy under 900 MB by removing the oldest clips that aren't starred. Your

@@ -77,6 +77,10 @@ async function render() {
   if (!status.paired) {
     swap($('state'), 'Not connected')
     $('connect').hidden = false
+    note.hidden = false
+    note.textContent = status.waiting
+      ? 'Allow it in the Earmark tab that opened. This turns to Listening once you have.'
+      : 'One step left: connect the extension to Earmark on this computer.'
     $('pause').hidden = true
     $('tab').hidden = $('heard').hidden = true
     return
@@ -127,7 +131,7 @@ $('connect').addEventListener('click', async () => {
   const r = await ask({ t: 'pair' })
   const note = $('note')
   note.hidden = false
-  note.textContent = r?.ok ? 'Allow the extension in the Earmark tab that just opened.' : `Couldn’t reach Earmark (${r?.error || 'offline'}).`
+  note.textContent = r?.ok ? 'Allow it in the Earmark tab that just opened.' : `Couldn’t reach Earmark (${r?.error || 'offline'}).`
 })
 
 render()

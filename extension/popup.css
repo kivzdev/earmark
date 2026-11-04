@@ -53,6 +53,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   transition: color 0.25s, background-color 0.25s;
 }
 .btn-solo:hover, .btn-solo:focus-visible { background: var(--fill); color: var(--fg) }
+/* the one thing to do next is lit before you reach for it */
+.btn-main { background: var(--fill); color: var(--fg) }
+.btn-main:hover { background: rgb(86 86 86 / 0.24) }
 .btn:focus-visible { outline: 1px solid var(--fg-2); outline-offset: 2px }
 
 /* words that change blur out where they stand and the new ones blur in in the same place (no sliding) */

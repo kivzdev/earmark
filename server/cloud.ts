@@ -113,7 +113,9 @@ app.post('/auth/register/options', async c => {
   const { code } = await c.req.json<{ code?: string }>().catch(() => ({ code: '' }))
   const list = await passkeys()
   if (!authed(c)) {
-    // the first passkey (or a lost one) is made with the setup code; after that only from inside
+    // the setup code makes the first passkey and nothing else: once there is one, a leaked code opens nothing.
+    // (Lost every passkey? Delete auth/passkeys.json from the Blob store and set up again.)
+    if (list.length) return c.json({ error: 'this page already has a passkey: sign in with it' }, 403)
     if (slow(c)) return c.json({ error: 'too many tries, wait a few minutes' }, 429)
     const setup = env('EARMARK_SETUP_CODE')
     if (setup.length < 12 || !code || !same(code, setup)) return c.json({ error: 'that setup code isn’t right' }, 401)
